@@ -57,7 +57,6 @@ class ChatApiService(private val workerUrl: String) {
                 }
             }
         }
-        channel.close()
     }
 }
 
