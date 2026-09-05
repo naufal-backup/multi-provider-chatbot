@@ -67,9 +67,11 @@ export default function Home() {
   } | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [modelDropOpen, setModelDropOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const modelDropRef = useRef<HTMLDivElement>(null);
   const started = messages.length > 0;
 
   const refresh = useCallback(async () => {
@@ -100,6 +102,17 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("cavemanLevel", cavemanLevel);
   }, [cavemanLevel]);
+
+  useEffect(() => {
+    if (!modelDropOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (modelDropRef.current && !modelDropRef.current.contains(e.target as Node)) {
+        setModelDropOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [modelDropOpen]);
 
   async function persistModelForSession(
     convId: string,
