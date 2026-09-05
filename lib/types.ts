@@ -31,17 +31,10 @@ export interface CustomProvider {
   name: string;
   kind: CustomKind;
   baseUrl: string;
-  models: string[];        // multiple models per custom provider
-  /** legacy field for migration from older single-model records */
+  models: string[];
+  /** legacy single-model migration */
   model?: string;
   createdAt: number;
-}
-
-export function normalizeCustomProvider(cp: CustomProvider): CustomProvider {
-  if (!cp.models || cp.models.length === 0) {
-    return { ...cp, models: cp.model ? [cp.model] : ["custom-model"] };
-  }
-  return cp;
 }
 
 export type ProviderSelection =

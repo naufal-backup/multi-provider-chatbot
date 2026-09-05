@@ -68,7 +68,8 @@ export default {
 
     if (!upstream.ok) {
       const text = await upstream.text().catch(() => "");
-      const friendly = friendlyUpstreamError(upstream.status, text, kind);
+      const k = body.custom ? (body.kind ?? "openai") : body.provider;
+      const friendly = friendlyUpstreamError(upstream.status, text, k);
       return json({ error: friendly }, upstream.status === 401 || upstream.status === 403 ? 401 : 502);
     }
 

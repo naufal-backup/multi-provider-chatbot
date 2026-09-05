@@ -18,12 +18,14 @@ const API_URL =
 
 export async function streamChat(
   req: StreamRequest,
-  onToken: (token: string) => void
+  onToken: (token: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
+    signal,
   });
 
   if (!res.ok) {

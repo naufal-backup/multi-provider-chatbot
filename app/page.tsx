@@ -5,7 +5,6 @@ import { Markdown } from "@/components/Markdown";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   BUILTIN_PROVIDERS,
-  defaultModelFor,
   type Attachment,
   type ChatMessage,
   type Conversation,
@@ -66,6 +65,8 @@ export default function Home() {
     text: string;
     attachments: Attachment[];
   } | null>(null);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -126,7 +127,6 @@ export default function Home() {
     if (conv.customProviderId) {
       const cp = customProviders.find((c) => c.id === conv.customProviderId);
       if (cp) {
-        // sesi menyimpan model terakhir — pakai conv.model, fallback models[0]
         const savedModel = conv.model;
         const list: string[] =
           Array.isArray((cp as any).models) && (cp as any).models.length
@@ -174,6 +174,31 @@ export default function Home() {
     return conv;
   }
 
+  async function sendToApi(
+    msgs: ChatMessage[],
+    onToken: (t: string) => void,
+    signal?: AbortSignal
+  ) {
+    const apiKey =
+      selection.kind === "builtin"
+        ? await getApiKey(selection.provider)
+        : await getApiKey(`custom_${selection.provider.id}`);
+    if (!apiKey) throw new Error("API key belum diatur. Buka Pengaturan untuk menambahkannya.");
+    await streamChat(
+      {
+        provider: selection.kind === "builtin" ? selection.provider : selection.provider.kind,
+        model: selection.model,
+        apiKey,
+        messages: msgs.map(({ role, content, attachments }) => ({ role, content, attachments })),
+        custom: selection.kind === "custom",
+        kind: selection.kind === "custom" ? selection.provider.kind : undefined,
+        baseUrl: selection.kind === "custom" ? selection.provider.baseUrl : undefined,
+      },
+      onToken,
+      signal
+    );
+  }
+
   async function handleSend(retryText?: string, retryAttachments?: Attachment[]) {
     const text = (retryText ?? input).trim();
     const sendAttachments = retryAttachments ?? attachments;
@@ -193,21 +218,7 @@ export default function Home() {
     setRetryPayload(null);
 
     const conv = await ensureConversation();
-
     await addMessage({ conversationId: conv.id, role: "user", content: text, attachments: sendAttachments });
-
-    const apiKey =
-      selection.kind === "builtin"
-        ? await getApiKey(selection.provider)
-        : await getApiKey(`custom_${selection.provider.id}`);
-
-    if (!apiKey) {
-      setError("API key belum diatur. Buka Pengaturan untuk menambahkannya.");
-      setStreaming(false);
-      setRetryPayload({ text, attachments: sendAttachments });
-      setMessages((m) => m.slice(0, -1));
-      return;
-    }
 
     abortRef.current = new AbortController();
 
@@ -216,35 +227,25 @@ export default function Home() {
       const outMessages: ChatMessage[] = cavemanEnabled
         ? [{ role: "system", content: getCavemanPrompt(cavemanLevel) }, ...messages.concat(userMsg)]
         : messages.concat(userMsg);
-      await streamChat(
-        {
-          provider: selection.kind === "builtin" ? selection.provider : selection.provider.kind,
-          model: selection.model,
-          apiKey,
-          messages: outMessages.map(({ role, content, attachments }) => ({ role, content, attachments })),
-          custom: selection.kind === "custom",
-          kind: selection.kind === "custom" ? selection.provider.kind : undefined,
-          baseUrl: selection.kind === "custom" ? selection.provider.baseUrl : undefined,
-        },
-        (token) => {
-          full += token;
-          setMessages((prev) => {
-            const copy = [...prev];
-            copy[copy.length - 1] = { role: "assistant", content: full };
-            return copy;
-          });
-        }
-      );
+      await sendToApi(outMessages, (token) => {
+        full += token;
+        setMessages((prev) => {
+          const copy = [...prev];
+          copy[copy.length - 1] = { role: "assistant", content: full };
+          return copy;
+        });
+      }, abortRef.current.signal);
 
       await addMessage({ conversationId: conv.id, role: "assistant", content: full, attachments: [] });
 
       const curr = await getMessages(conv.id);
       if (curr.length <= 2 && text) {
-        const title = text.slice(0, 40) + (text.length > 40 ? "…" : "");
+        const title = text.slice(0, 40) + (text.length > 40 ? "..." : "");
         await renameConversation(conv.id, title);
       }
       await refresh();
     } catch (e: any) {
+      if (e?.name === "AbortError") return;
       setError(e?.message ?? "Terjadi kesalahan.");
       setRetryPayload({ text, attachments: sendAttachments });
       setMessages((m) => m.slice(0, -1));
@@ -252,6 +253,73 @@ export default function Home() {
       setStreaming(false);
       abortRef.current = null;
     }
+  }
+
+  async function handleRegenerate() {
+    if (streaming || messages.length < 2) return;
+    const lastUserIdx = messages.length - 2;
+    const lastUser = messages[lastUserIdx];
+    if (lastUser.role !== "user") return;
+
+    setMessages((m) => m.slice(0, -1));
+    setStreaming(true);
+    setError(null);
+    setRetryPayload(null);
+
+    const conv = await ensureConversation();
+
+    abortRef.current = new AbortController();
+
+    let full = "";
+    try {
+      const hist = messages.slice(0, -1);
+      const outMessages: ChatMessage[] = cavemanEnabled
+        ? [{ role: "system", content: getCavemanPrompt(cavemanLevel) }, ...hist]
+        : hist;
+      await sendToApi(outMessages, (token) => {
+        full += token;
+        setMessages((prev) => {
+          const copy = [...prev];
+          copy[copy.length - 1] = { role: "assistant", content: full };
+          return copy;
+        });
+      }, abortRef.current.signal);
+
+      await addMessage({ conversationId: conv.id, role: "assistant", content: full, attachments: [] });
+      await refresh();
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setError(e?.message ?? "Terjadi kesalahan.");
+      setMessages((m) => m.slice(0, -1));
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }
+
+  async function handleEditSave(idx: number) {
+    const newText = editingText.trim();
+    if (!newText) return;
+    const updated = [...messages];
+    updated[idx] = { ...updated[idx], content: newText };
+    setMessages(updated);
+    setEditingIdx(null);
+    setEditingText("");
+    if (activeConvId) {
+      const conv = await getConversation(activeConvId);
+      if (conv) {
+        const dbMsgs = await getMessages(activeConvId);
+        if (dbMsgs[idx]) {
+          await addMessage({ conversationId: activeConvId, role: updated[idx].role, content: newText, attachments: updated[idx].attachments ?? [] });
+        }
+      }
+    }
+  }
+
+  function handleRevert() {
+    if (messages.length < 2) return;
+    setMessages((m) => m.slice(0, -2));
+    setError(null);
   }
 
   function handleStop() {
@@ -279,10 +347,16 @@ export default function Home() {
       {/* Sidebar */}
       <aside className={`drawer ${mobileNav ? "open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark"></div>
+          <div className="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a4 4 0 0 0-4 4v2h8V6a4 4 0 0 0-4-4z"/>
+              <rect x="4" y="8" width="16" height="14" rx="2"/>
+              <path d="M12 12v2M9 18h6"/>
+            </svg>
+          </div>
           <div className="brand-name display-font">Asisten</div>
-          <button className="collapse-btn" title={collapsed ? "Expand" : "Minimize"} onClick={() => { setCollapsed(!collapsed); setMobileNav(false); }} style={{ marginLeft: "auto" }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d={collapsed ? "M9 18l6-6-6-6" : "M15 18l-6-6 6-6"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <button className="collapse-btn" title="Minimize" onClick={() => { setCollapsed(!collapsed); setMobileNav(false); }} style={{ marginLeft: "auto" }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
         </div>
 
@@ -329,31 +403,35 @@ export default function Home() {
       <main className="main">
         <div className="topbar">
           <div className="topbar-left">
-            <button className="collapse-btn" title={collapsed ? "Expand sidebar" : "Minimize sidebar"} onClick={() => setCollapsed(!collapsed)} style={{ display: collapsed ? "flex" : "none" }}>
+            <button className="collapse-btn" title="Expand sidebar" onClick={() => setCollapsed(!collapsed)} style={{ display: collapsed ? "flex" : "none" }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </button>
-            <button className="icon-btn" title="Menu" onClick={() => setMobileNav(!mobileNav)} style={{ display: "none" }} id="mobile-menu">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
             </button>
             <div className="topbar-title display-font">{currentTitle}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {started && !streaming && (
+              <button className="icon-btn" title="Salin percakapan" onClick={() => {
+                const text = messages.map((m) => `${m.role === "user" ? "Kamu" : "AI"}: ${m.content}`).join("\n\n");
+                navigator.clipboard.writeText(text);
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            )}
+
             <div className="model-pill">
               <span className="model-dot"></span>
               <select
-                value={selection.kind === "builtin" ? `builtin:${selection.provider}` : `custom:${selection.provider.id}`}
+                value={selection.kind === "builtin" ? `builtin:${selection.provider}:${selection.model}` : `custom:${selection.provider.id}:${selection.model}`}
                 onChange={(e) => {
                   const val = e.target.value;
                   let next: ProviderSelection | null = null;
                   if (val.startsWith("custom:")) {
-                    const cp = customProviders.find((c) => c.id === val.slice(7));
-                    if (cp) {
-                      const list: string[] = Array.isArray((cp as any).models) && (cp as any).models.length ? (cp as any).models : cp.model ? [cp.model] : ["custom-model"];
-                      next = { kind: "custom", provider: cp as any, model: list[0] };
-                    }
+                    const [, id, model] = val.split(":");
+                    const cp = customProviders.find((c) => c.id === id);
+                    if (cp) next = { kind: "custom", provider: cp as any, model };
                   } else {
-                    const provider = val.slice(8) as any;
-                    next = { kind: "builtin", provider, model: defaultModelFor(provider) };
+                    const [, provider, model] = val.split(":");
+                    next = { kind: "builtin", provider: provider as any, model };
                   }
                   if (next) {
                     setSelection(next);
@@ -362,33 +440,22 @@ export default function Home() {
                 }}
               >
                 {BUILTIN_PROVIDERS.map((p) => (
-                  <option key={p.key} value={`builtin:${p.key}`}>{p.displayName}</option>
+                  <optgroup key={p.key} label={p.displayName}>
+                    {p.models.map((m) => (
+                      <option key={m} value={`builtin:${p.key}:${m}`}>{m}</option>
+                    ))}
+                  </optgroup>
                 ))}
-                {customProviders.map((cp) => (
-                  <option key={cp.id} value={`custom:${cp.id}`}>{cp.name}</option>
-                ))}
-              </select>
-              <span className="pill-caret" aria-hidden>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </span>
-            </div>
-
-            <div className="model-pill">
-              <select
-                value={selection.model}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const next: ProviderSelection = selection.kind === "builtin" ? { ...selection, model: v } : { ...selection, model: v };
-                  setSelection(next);
-                  if (activeConvId) persistModelForSession(activeConvId, next);
-                }}
-              >
-                {(selection.kind === "builtin"
-                  ? (BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.models ?? [])
-                  : (((selection as any).provider?.models as string[] | undefined) ?? ((selection as any).provider?.model ? [(selection as any).provider.model as string] : []))
-                ).map((m: string) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
+                {customProviders.length > 0 && (
+                  <optgroup label="Custom">
+                    {customProviders.map((cp) => {
+                      const list: string[] = Array.isArray((cp as any).models) && (cp as any).models.length ? (cp as any).models : cp.model ? [cp.model] : ["custom-model"];
+                      return list.map((m) => (
+                        <option key={`${cp.id}:${m}`} value={`custom:${cp.id}:${m}`}>{cp.name} - {m}</option>
+                      ));
+                    })}
+                  </optgroup>
+                )}
               </select>
               <span className="pill-caret" aria-hidden>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -397,26 +464,26 @@ export default function Home() {
 
             <button className="icon-btn" title="Mode" onClick={toggle}>
               {dark ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
               ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
               )}
             </button>
 
             <button
               className="icon-btn"
-              title={cavemanEnabled ? `Caveman ${cavemanLevel} — tap to off` : "Caveman off — tap to on"}
+              title={cavemanEnabled ? `Caveman ${cavemanLevel}` : "Caveman off"}
               onClick={() => setCavemanEnabled((v) => !v)}
               style={cavemanEnabled ? { background: "var(--md-primary-container)", color: "var(--md-on-primary-container)", borderColor: "var(--md-primary)" } : undefined}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path d="M7 14l2-6 3 4 2-3 3 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M4 16l2 2 3-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
 
             <button className="icon-btn" title="Pengaturan" onClick={() => setSettingsOpen(true)}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </button>
           </div>
         </div>
@@ -427,7 +494,7 @@ export default function Home() {
               <div className="empty-mark"></div>
               <div className="empty-title display-font">Ada yang bisa dibantu?</div>
               <div className="empty-sub">
-                Tanyakan apa saja — mulai dari menulis, merangkum, sampai memecahkan masalah sehari-hari.
+                Tanyakan apa saja - mulai dari menulis, merangkum, sampai memecahkan masalah sehari-hari.
               </div>
               <div className="suggestion-row">
                 {SUGGESTIONS.map((s) => (
@@ -441,7 +508,9 @@ export default function Home() {
 
           {(started || streaming) && (
             <div className="conv-inner">
-              {messages.map((m, i) => (
+              {messages.map((m, i) => {
+                const isLastAssistant = m.role === "assistant" && i === messages.length - 1;
+                return (
                 <div key={i} className={`msg-row ${m.role === "user" ? "user" : "bot"}`}>
                   <div className={`msg-avatar ${m.role === "user" ? "user" : "bot"}`}>
                     {m.role === "user" ? "A" : "AI"}
@@ -454,14 +523,55 @@ export default function Home() {
                     )}
                     {m.role === "assistant" && m.content === "" && streaming ? (
                       <div className="typing"><span></span><span></span><span></span></div>
+                    ) : editingIdx === i ? (
+                      <div>
+                        <textarea
+                          className="msg-edit-area"
+                          value={editingText}
+                          onChange={(e) => setEditingText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSave(i); }
+                            if (e.key === "Escape") { setEditingIdx(null); setEditingText(""); }
+                          }}
+                          autoFocus
+                        />
+                        <div className="msg-edit-btns">
+                          <button className="btn primary" onClick={() => handleEditSave(i)}>Simpan</button>
+                          <button className="btn text" onClick={() => { setEditingIdx(null); setEditingText(""); }}>Batal</button>
+                        </div>
+                      </div>
                     ) : m.role === "assistant" ? (
                       <Markdown content={m.content} />
                     ) : (
                       <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
                     )}
+
+                    {m.content && !streaming && (
+                      <div className="msg-actions">
+                        {m.role === "user" && (
+                          <button className="msg-action" title="Edit" onClick={() => { setEditingIdx(i); setEditingText(m.content); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/></svg>
+                          </button>
+                        )}
+                        {isLastAssistant && (
+                          <button className="msg-action" title="Regenerate" onClick={handleRegenerate}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                          </button>
+                        )}
+                        <button className="msg-action" title="Salin" onClick={() => navigator.clipboard.writeText(m.content)}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                        {isLastAssistant && messages.length >= 2 && (
+                          <button className="msg-action" title="Revert" onClick={handleRevert}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
 
               {error && (
                 <div className="error-banner">
@@ -490,7 +600,7 @@ export default function Home() {
                   {attachments.map((a, i) => (
                     <span key={i} className="attach-chip">
                       {a.filename ?? a.type}
-                      <span style={{ cursor: "pointer" }} onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}>✕</span>
+                      <span style={{ cursor: "pointer" }} onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}>&#x2715;</span>
                     </span>
                   ))}
                 </div>
@@ -576,15 +686,62 @@ export default function Home() {
 }
 
 function AttachmentView({ att }: { att: Attachment }) {
+  function downloadData(dataBase64: string, mimeType: string, filename: string) {
+    const bin = atob(dataBase64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const blob = new Blob([arr], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function copyData(dataBase64: string) {
+    const bin = atob(dataBase64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    navigator.clipboard.write([new ClipboardItem({ [att.mimeType]: new Blob([arr], { type: att.mimeType }) })]);
+  }
+
   if (att.url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={att.url} alt={att.filename ?? "image"} />;
+    return (
+      <span className="attach-chip">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        {att.filename ?? "link"}
+        <span className="attach-actions">
+          <a className="attach-action" href={att.url} target="_blank" rel="noopener noreferrer" title="Buka"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg></a>
+        </span>
+      </span>
+    );
   }
   if (att.type === "image" && att.dataBase64) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={`data:${att.mimeType};base64,${att.dataBase64}`} alt={att.filename ?? "image"} />;
+    return (
+      <span className="attach-chip">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        {att.filename ?? "gambar"}
+        <span className="attach-actions">
+          <button className="attach-action" title="Lihat" onClick={() => { const w = window.open(); if (w) { w.document.write(`<img src="data:${att.mimeType};base64,${att.dataBase64}" style="max-width:100%"/>`); } }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button className="attach-action" title="Salin" onClick={() => copyData(att.dataBase64!)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+          <button className="attach-action" title="Unduh" onClick={() => downloadData(att.dataBase64!, att.mimeType, att.filename ?? "image")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></button>
+        </span>
+      </span>
+    );
   }
-  return <span className="attach-chip">📄 {att.filename}</span>;
+  return (
+    <span className="attach-chip">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 12v6M9 15h6"/></svg>
+      {att.filename}
+      <span className="attach-actions">
+        {att.dataBase64 && (
+          <>
+            <button className="attach-action" title="Salin" onClick={() => copyData(att.dataBase64!)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button className="attach-action" title="Unduh" onClick={() => downloadData(att.dataBase64!, att.mimeType, att.filename ?? "file")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></button>
+          </>
+        )}
+      </span>
+    </span>
+  );
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -648,9 +805,9 @@ function SettingsDialog({
           <div className="field" style={{ marginTop: 8 }}>
             <label>Tingkat</label>
             <select value={cavemanLevel} onChange={(e) => onSetCavemanLevel(e.target.value as any)}>
-              <option value="lite">lite — no filler, full sentences</option>
-              <option value="full">full — classic caveman</option>
-              <option value="ultra">ultra — max terse</option>
+              <option value="lite">lite - no filler, full sentences</option>
+              <option value="full">full - classic caveman</option>
+              <option value="ultra">ultra - max terse</option>
             </select>
           </div>
         )}
@@ -661,7 +818,7 @@ function SettingsDialog({
             <label>
               {p.displayName}{" "}
               <span className={`key-status ${apiKeys[p.key] ? "ok" : ""}`}>
-                {apiKeys[p.key] ? "• terhubung" : "• belum diatur"}
+                {apiKeys[p.key] ? "terhubung" : "belum diatur"}
               </span>
             </label>
             <input
@@ -681,7 +838,7 @@ function SettingsDialog({
           <div className="provider-row" key={cp.id}>
             <div className="p-info">
               {cp.name}
-              <small>{cp.kind} · {list.join(", ") || "—"}</small>
+              <small>{cp.kind} - {list.join(", ") || "---"}</small>
             </div>
             <div className="p-actions">
               <button title="Edit" onClick={() => onEditCustom(cp)}>
@@ -758,7 +915,7 @@ function CustomProviderDialog({
           <small>{kind === "claude" ? "Tambahkan /v1/messages otomatis." : "Tambahkan /chat/completions otomatis."}</small>
         </div>
         <div className="field">
-          <label>Model — pisahkan dengan koma untuk banyak model</label>
+          <label>Model - pisahkan dengan koma untuk banyak model</label>
           <input value={modelsText} onChange={(e) => setModelsText(e.target.value)} placeholder="mis. deepseek-chat, deepseek-reasoner" />
           <small>Satu provider bisa punya banyak model. Model aktif dipilih di topbar & disimpan per sesi.</small>
         </div>
