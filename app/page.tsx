@@ -313,19 +313,44 @@ export default function Home() {
   async function handleEditSave(idx: number) {
     const newText = editingText.trim();
     if (!newText) return;
+    const userMsg = messages[idx];
+    if (!userMsg || userMsg.role !== "user") return;
+
     const updated = [...messages];
     updated[idx] = { ...updated[idx], content: newText };
-    setMessages(updated);
+    const trimmed = updated.slice(0, idx + 1);
+    setMessages([...trimmed, { role: "assistant", content: "" }]);
     setEditingIdx(null);
     setEditingText("");
-    if (activeConvId) {
-      const conv = await getConversation(activeConvId);
-      if (conv) {
-        const dbMsgs = await getMessages(activeConvId);
-        if (dbMsgs[idx]) {
-          await addMessage({ conversationId: activeConvId, role: updated[idx].role, content: newText, attachments: updated[idx].attachments ?? [] });
-        }
-      }
+    setStreaming(true);
+    setError(null);
+
+    const conv = await ensureConversation();
+    abortRef.current = new AbortController();
+
+    let full = "";
+    try {
+      const outMessages: ChatMessage[] = cavemanEnabled
+        ? [{ role: "system", content: getCavemanPrompt(cavemanLevel) }, ...trimmed]
+        : trimmed;
+      await sendToApi(outMessages, (token) => {
+        full += token;
+        setMessages((prev) => {
+          const copy = [...prev];
+          copy[copy.length - 1] = { role: "assistant", content: full };
+          return copy;
+        });
+      }, abortRef.current.signal);
+
+      await addMessage({ conversationId: conv.id, role: "assistant", content: full, attachments: [] });
+      await refresh();
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setError(e?.message ?? "Terjadi kesalahan.");
+      setMessages(trimmed);
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
     }
   }
 
@@ -431,48 +456,63 @@ export default function Home() {
               </button>
             )}
 
-            <div className="model-pill">
-              <span className="model-dot"></span>
-              <select
-                value={selection.kind === "builtin" ? `builtin:${selection.provider}:${selection.model}` : `custom:${selection.provider.id}:${selection.model}`}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  let next: ProviderSelection | null = null;
-                  if (val.startsWith("custom:")) {
-                    const [, id, model] = val.split(":");
-                    const cp = customProviders.find((c) => c.id === id);
-                    if (cp) next = { kind: "custom", provider: cp as any, model };
-                  } else {
-                    const [, provider, model] = val.split(":");
-                    next = { kind: "builtin", provider: provider as any, model };
-                  }
-                  if (next) {
-                    setSelection(next);
-                    if (activeConvId) persistModelForSession(activeConvId, next);
-                  }
-                }}
-              >
-                {BUILTIN_PROVIDERS.map((p) => (
-                  <optgroup key={p.key} label={p.displayName}>
-                    {p.models.map((m) => (
-                      <option key={m} value={`builtin:${p.key}:${m}`}>{m}</option>
-                    ))}
-                  </optgroup>
-                ))}
-                {customProviders.length > 0 && (
-                  <optgroup label="Custom">
-                    {customProviders.map((cp) => {
-                      const list: string[] = Array.isArray((cp as any).models) && (cp as any).models.length ? (cp as any).models : cp.model ? [cp.model] : ["custom-model"];
-                      return list.map((m) => (
-                        <option key={`${cp.id}:${m}`} value={`custom:${cp.id}:${m}`}>{cp.name} - {m}</option>
-                      ));
-                    })}
-                  </optgroup>
-                )}
-              </select>
-              <span className="pill-caret" aria-hidden>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </span>
+            <div className="model-pill" ref={modelDropRef} style={{ position: "relative" }}>
+              <button className="model-pill-btn" onClick={() => setModelDropOpen((v) => !v)}>
+                <span className="model-dot"></span>
+                <span className="model-pill-label">
+                  {selection.kind === "builtin"
+                    ? `${BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.displayName ?? selection.provider}`
+                    : (selection.provider as CustomProvider).name}
+                  <span className="model-pill-model">{selection.model}</span>
+                </span>
+                <span className="pill-caret" aria-hidden>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </span>
+              </button>
+
+              {modelDropOpen && (
+                <div className="model-dropdown">
+                  {BUILTIN_PROVIDERS.map((p) => (
+                    <div key={p.key} className="md-group">
+                      <div className="md-group-label">{p.displayName}</div>
+                      {p.models.map((m) => {
+                        const active = selection.kind === "builtin" && selection.provider === p.key && selection.model === m;
+                        return (
+                          <button key={m} className={`md-item ${active ? "active" : ""}`} onClick={() => {
+                            const next: ProviderSelection = { kind: "builtin", provider: p.key, model: m };
+                            setSelection(next);
+                            if (activeConvId) persistModelForSession(activeConvId, next);
+                            setModelDropOpen(false);
+                          }}>
+                            {m}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  {customProviders.length > 0 && (
+                    <div className="md-group">
+                      <div className="md-group-label">Custom</div>
+                      {customProviders.map((cp) => {
+                        const list: string[] = Array.isArray((cp as any).models) && (cp as any).models.length ? (cp as any).models : cp.model ? [cp.model] : ["custom-model"];
+                        return list.map((m) => {
+                          const active = selection.kind === "custom" && (selection.provider as CustomProvider).id === cp.id && selection.model === m;
+                          return (
+                            <button key={`${cp.id}:${m}`} className={`md-item ${active ? "active" : ""}`} onClick={() => {
+                              const next: ProviderSelection = { kind: "custom", provider: cp as any, model: m };
+                              setSelection(next);
+                              if (activeConvId) persistModelForSession(activeConvId, next);
+                              setModelDropOpen(false);
+                            }}>
+                              {cp.name} - {m}
+                            </button>
+                          );
+                        });
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <button className="icon-btn" title="Mode" onClick={toggle}>
@@ -496,7 +536,7 @@ export default function Home() {
             </button>
 
             <button className="icon-btn" title="Pengaturan" onClick={() => setSettingsOpen(true)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
         </div>
