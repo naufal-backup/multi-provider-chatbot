@@ -174,3 +174,75 @@ export async function listApiKeys(): Promise<Record<string, boolean>> {
   }
   return out;
 }
+
+// ---- Export / Import ----
+
+export interface ChatBackup {
+  version: 1;
+  exportedAt: number;
+  conversations: Conversation[];
+  messages: { conversationId: string; role: string; content: string; attachments?: Attachment[]; createdAt: number }[];
+  customProviders: CustomProvider[];
+}
+
+export async function exportAll(): Promise<ChatBackup> {
+  const db = await getDB();
+  const conversations = await db.getAll("conversations");
+  const rawMsgs = await db.getAll("messages");
+  const messages = rawMsgs.map((r) => ({
+    conversationId: r.conversationId,
+    role: r.role,
+    content: r.content,
+    attachments: r.attachmentsJson ? JSON.parse(r.attachmentsJson) as Attachment[] : [],
+    createdAt: r.createdAt,
+  }));
+  const customProviders = await db.getAll("customProviders");
+  return { version: 1, exportedAt: Date.now(), conversations, messages, customProviders };
+}
+
+export async function exportConversation(convId: string): Promise<ChatBackup> {
+  const db = await getDB();
+  const conv = await db.get("conversations", convId);
+  const rawMsgs = await db.getAllFromIndex("messages", "conversationId", convId);
+  const messages = rawMsgs.map((r) => ({
+    conversationId: r.conversationId,
+    role: r.role,
+    content: r.content,
+    attachments: r.attachmentsJson ? JSON.parse(r.attachmentsJson) as Attachment[] : [],
+    createdAt: r.createdAt,
+  }));
+  let customProviders: CustomProvider[] = [];
+  if (conv?.customProviderId) {
+    const cp = await db.get("customProviders", conv.customProviderId);
+    if (cp) customProviders = [cp];
+  }
+  return { version: 1, exportedAt: Date.now(), conversations: conv ? [conv] : [], messages, customProviders };
+}
+
+export async function importBackup(data: ChatBackup): Promise<{ imported: number; skipped: number }> {
+  const db = await getDB();
+  let imported = 0;
+  let skipped = 0;
+  const tx = db.transaction(["conversations", "messages", "customProviders"], "readwrite");
+  for (const conv of data.conversations ?? []) {
+    const existing = await tx.objectStore("conversations").get(conv.id);
+    if (existing) { skipped++; continue; }
+    await tx.objectStore("conversations").put(conv);
+    imported++;
+  }
+  for (const msg of data.messages ?? []) {
+    await tx.objectStore("messages").add({
+      conversationId: msg.conversationId,
+      role: msg.role,
+      content: msg.content,
+      attachmentsJson: msg.attachments?.length ? JSON.stringify(msg.attachments) : null,
+      createdAt: msg.createdAt,
+    });
+  }
+  for (const cp of data.customProviders ?? []) {
+    const existing = await tx.objectStore("customProviders").get(cp.id);
+    if (!existing) await tx.objectStore("customProviders").put(cp);
+  }
+  await tx.done;
+  return { imported, skipped };
+}

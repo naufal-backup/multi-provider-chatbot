@@ -27,6 +27,9 @@ import {
   upsertConversation,
   upsertCustomProvider,
   deleteCustomProvider as deleteCustomProviderDb,
+  exportAll,
+  exportConversation,
+  importBackup,
 } from "@/lib/db";
 import { streamChat } from "@/lib/stream";
 
@@ -377,6 +380,41 @@ export default function Home() {
     e.target.value = "";
   }
 
+  function downloadJson(data: any, filename: string) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleExportAll() {
+    const data = await exportAll();
+    downloadJson(data, `asisten-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  }
+
+  async function handleExportConv(convId: string) {
+    const data = await exportConversation(convId);
+    const conv = data.conversations[0];
+    const name = conv?.title?.replace(/[^a-zA-Z0-9]/g, "-") ?? convId;
+    downloadJson(data, `asisten-${name}.json`);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const data = JSON.parse(text);
+      const result = await importBackup(data);
+      alert(`Import selesai: ${result.imported} percakapan ditambahkan, ${result.skipped} dilewati (sudah ada).`);
+      await refresh();
+    } catch {
+      alert("File tidak valid atau format salah.");
+    }
+    e.target.value = "";
+  }
+
   const currentTitle =
     conversations.find((c) => c.id === activeConvId)?.title ?? "Percakapan baru";
 
@@ -403,29 +441,30 @@ export default function Home() {
           <span>Percakapan baru</span>
         </button>
 
-        <div className="nav-section-label">Terbaru</div>
-        {conversations.map((c) => (
-          <button
-            key={c.id}
-            className={`nav-item ${c.id === activeConvId ? "active" : ""}`}
-            onClick={() => { loadConversation(c.id); setMobileNav(false); }}
-            title={c.title}
-          >
-            <span>{c.title}</span>
-            <span
-              className="nav-del"
-              title="Hapus"
-              onClick={async (e) => {
+        <div className="nav-list">
+          <div className="nav-section-label">Terbaru</div>
+          {conversations.map((c) => (
+            <button
+              key={c.id}
+              className={`nav-item ${c.id === activeConvId ? "active" : ""}`}
+              onClick={() => { loadConversation(c.id); setMobileNav(false); }}
+              title={c.title}
+            >
+              <span>{c.title}</span>
+              <span className="nav-del" title="Export" onClick={async (e) => { e.stopPropagation(); await handleExportConv(c.id); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </span>
+              <span className="nav-del" title="Hapus" onClick={async (e) => {
                 e.stopPropagation();
                 await deleteConversation(c.id);
                 if (c.id === activeConvId) newConversation();
                 refresh();
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </span>
-          </button>
-        ))}
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </span>
+            </button>
+          ))}
+        </div>
 
         <button className="drawer-footer" onClick={() => setSettingsOpen(true)}>
           <div className="avatar">A</div>
@@ -712,6 +751,8 @@ export default function Home() {
           onOpenCustom={() => { setEditingCustom(null); setCustomDialogOpen(true); }}
           onEditCustom={(cp) => { setEditingCustom(cp); setCustomDialogOpen(true); }}
           onDeleteCustom={async (cp) => { await deleteCustomProviderDb(cp.id); refresh(); }}
+          onExportAll={handleExportAll}
+          onImport={handleImport}
         />
       )}
 
@@ -822,6 +863,8 @@ function SettingsDialog({
   onOpenCustom,
   onEditCustom,
   onDeleteCustom,
+  onExportAll,
+  onImport,
 }: {
   apiKeys: Record<string, boolean>;
   customProviders: CustomProvider[];
@@ -836,6 +879,8 @@ function SettingsDialog({
   onOpenCustom: () => void;
   onEditCustom: (cp: CustomProvider) => void;
   onDeleteCustom: (cp: CustomProvider) => void;
+  onExportAll: () => void;
+  onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   const [keys, setKeys] = useState<Record<string, string>>({});
 
@@ -908,6 +953,21 @@ function SettingsDialog({
         <button className="btn text" style={{ marginTop: 8 }} onClick={onOpenCustom}>
           + Tambah custom provider
         </button>
+
+        <div className="dlg-section">Backup & Restore</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn text" onClick={onExportAll}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              Export semua
+            </span>
+          </button>
+          <label className="btn text" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+            Import
+            <input type="file" accept=".json" hidden onChange={onImport} />
+          </label>
+        </div>
 
         <div className="dlg-actions">
           <button className="btn text" onClick={onClose}>Tutup</button>
