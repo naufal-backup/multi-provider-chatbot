@@ -56,6 +56,17 @@ function CodeBlock({ language, children }: { language?: string; children: string
   );
 }
 
+function flattenChildren(children: React.ReactNode): string {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (!children) return "";
+  if (Array.isArray(children)) return children.map(flattenChildren).join("");
+  if (typeof children === "object" && "props" in children) {
+    return flattenChildren((children as React.ReactElement).props.children);
+  }
+  return "";
+}
+
 export function Markdown({ content }: { content: string }) {
   return (
     <div className="md-wrap">
@@ -69,7 +80,7 @@ export function Markdown({ content }: { content: string }) {
             ),
             code({ node, className, children, ...props }) {
               const match = /language-(\w+)/.exec(className || "");
-              const codeStr = String(children).replace(/\n$/, "");
+              const codeStr = flattenChildren(children).replace(/\n$/, "");
               if (match || codeStr.includes("\n")) {
                 return <CodeBlock language={match?.[1]}>{codeStr}</CodeBlock>;
               }

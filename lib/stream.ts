@@ -60,10 +60,12 @@ export async function streamChat(
 
       let token: string;
       try {
-        token = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        token = typeof parsed === "string" ? parsed : typeof parsed === "number" ? String(parsed) : "";
       } catch {
         continue;
       }
+      if (!token) continue;
       full += token;
       onToken(token);
     }

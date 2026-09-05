@@ -104,7 +104,10 @@ export default {
 
               const delta = parseChunk(parsed);
               if (delta) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(delta)}\n\n`));
+                const text = typeof delta === "string" ? delta : typeof delta === "number" ? String(delta) : "";
+                if (text) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(text)}\n\n`));
+                }
               }
             }
           }
