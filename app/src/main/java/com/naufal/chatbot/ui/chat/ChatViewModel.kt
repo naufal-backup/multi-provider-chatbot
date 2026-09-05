@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 
 data class ChatUiState(
     val conversation: Conversation? = null,
@@ -35,6 +36,7 @@ class ChatViewModel(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+    private var streamJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -168,6 +170,7 @@ class ChatViewModel(
                     selection = selection,
                     messages = allMessages
                 )
+                streamJob = this@launch.coroutineContext[Job]
 
                 val sb = StringBuilder()
                 stream.collect { token ->
@@ -203,9 +206,16 @@ class ChatViewModel(
                 if (msgs.isNotEmpty()) msgs.removeAt(msgs.size - 1)
                 _uiState.value = _uiState.value.copy(messages = msgs)
             } finally {
+                streamJob = null
                 _uiState.value = _uiState.value.copy(isStreaming = false)
             }
         }
+    }
+
+    fun stopStreaming() {
+        streamJob?.cancel()
+        streamJob = null
+        _uiState.value = _uiState.value.copy(isStreaming = false)
     }
 
     class Factory(private val repository: ChatRepository) : ViewModelProvider.Factory {

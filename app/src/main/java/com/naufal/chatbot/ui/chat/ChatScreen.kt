@@ -1,54 +1,58 @@
 package com.naufal.chatbot.ui.chat
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.naufal.chatbot.Provider
 import com.naufal.chatbot.data.repository.ChatRepository
-import com.naufal.chatbot.model.ChatMessage
+import com.naufal.chatbot.model.Attachment
 import com.naufal.chatbot.ui.components.MessageBubble
 import com.naufal.chatbot.ui.components.ProviderModelSelector
+import kotlinx.coroutines.launch
+import java.util.Base64
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +68,9 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         if (!uiState.isInitialized) {
@@ -75,11 +82,16 @@ fun ChatScreen(
         }
     }
 
-    // Auto-scroll to bottom
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
             listState.animateScrollToItem(uiState.messages.size - 1)
         }
+    }
+
+    val pickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { resolveAttachment(it, viewModel, context) }
     }
 
     Scaffold(
@@ -112,21 +124,20 @@ fun ChatScreen(
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Provider & model selector
             ProviderModelSelector(
                 selection = uiState.selection,
                 customProviders = uiState.customProviders,
                 onSelectionChange = { viewModel.setSelection(it) }
             )
 
-            // Messages
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -136,11 +147,15 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(uiState.messages) { message ->
-                    MessageBubble(message = message)
+                    MessageBubble(
+                        message = message,
+                        onCopy = {
+                            scope.launch { snackbarHostState.showSnackbar("Copied") }
+                        }
+                    )
                 }
             }
 
-            // Error banner
             uiState.error?.let { error ->
                 Text(
                     text = error,
@@ -150,13 +165,34 @@ fun ChatScreen(
                 )
             }
 
-            // Input area
+            // Pending attachments preview
+            if (uiState.pendingAttachments.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    uiState.pendingAttachments.forEachIndexed { index, att ->
+                        AttachmentChip(
+                            attachment = att,
+                            onRemove = { viewModel.removeAttachmentAt(index) }
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Bottom
             ) {
+                IconButton(onClick = { pickerLauncher.launch("*/*") }) {
+                    Icon(Icons.Default.AttachFile, contentDescription = "Attach file")
+                }
+
                 OutlinedTextField(
                     value = uiState.inputText,
                     onValueChange = { viewModel.setInputText(it) },
@@ -169,7 +205,7 @@ fun ChatScreen(
                 Spacer(modifier = Modifier.width(8.dp))
 
                 if (uiState.isStreaming) {
-                    IconButton(onClick = { /* stop streaming — todo */ }) {
+                    IconButton(onClick = { viewModel.stopStreaming() }) {
                         Icon(Icons.Default.Stop, contentDescription = "Stop")
                     }
                 } else {
@@ -178,6 +214,57 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+private fun resolveAttachment(
+    uri: Uri,
+    viewModel: ChatViewModel,
+    context: android.content.Context
+) {
+    val resolver = context.contentResolver
+    val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+    val filename = resolver.query(uri, null, null, null, null)?.use { cursor ->
+        val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+        if (nameIdx >= 0 && cursor.moveToFirst()) cursor.getString(nameIdx) else null
+    }
+    val bytes = try {
+        resolver.openInputStream(uri)?.use { it.readBytes() }
+    } catch (_: Exception) {
+        null
+    }
+    val type = if (mimeType.startsWith("image")) "image" else "document"
+
+    val attachment = Attachment(
+        type = type,
+        mimeType = mimeType,
+        filename = filename,
+        dataBase64 = bytes?.let { Base64.getEncoder().encodeToString(it) }
+    )
+    viewModel.addAttachment(attachment)
+}
+
+@Composable
+private fun AttachmentChip(
+    attachment: Attachment,
+    onRemove: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        Text(
+            text = attachment.filename ?: attachment.type,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "Remove",
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }

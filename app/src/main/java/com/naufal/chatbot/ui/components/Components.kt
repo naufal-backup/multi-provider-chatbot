@@ -7,52 +7,143 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.naufal.chatbot.Provider
+import com.naufal.chatbot.model.Attachment
 import com.naufal.chatbot.model.ChatMessage
 import com.naufal.chatbot.model.CustomProvider
 import com.naufal.chatbot.model.ProviderSelection
+import kotlinx.coroutines.launch
 
 @Composable
-fun MessageBubble(message: ChatMessage) {
+fun MessageBubble(
+    message: ChatMessage,
+    onCopy: (String) -> Unit = {}
+) {
     val isUser = message.role == "user"
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .background(
-                    color = if (isUser)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(16.dp)
-                )
-                .padding(12.dp)
+        Column(
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+            modifier = Modifier.fillMaxWidth(0.85f)
         ) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = if (isUser)
+                            MaterialTheme.colorScheme.primaryContainer
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(12.dp)
+            ) {
+                Column {
+                    // Attachments (images / documents)
+                    message.attachments.forEach { att ->
+                        AttachmentView(att, context)
+                    }
+
+                    if (message.content.isNotBlank()) {
+                        if (isUser) {
+                            Text(
+                                text = message.content,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        } else {
+                            MarkdownText(
+                                text = message.content,
+                                onCopy = onCopy
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (!isUser) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        clipboard.setText(AnnotatedString(message.content))
+                        onCopy(message.content)
+                    }) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentView(att: Attachment, context: android.content.Context) {
+    when {
+        att.type == "image" && att.url != null -> {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(att.url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = att.filename ?: "image",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            )
+        }
+        att.type == "image" && att.dataBase64 != null -> {
+            val bytes = android.util.Base64.decode(att.dataBase64, android.util.Base64.DEFAULT)
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(bytes)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = att.filename ?: "image",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            )
+        }
+        att.filename != null -> {
             Text(
-                text = message.content,
-                color = if (isUser)
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                else
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                text = "Attachment: ${att.filename}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }

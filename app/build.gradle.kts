@@ -82,9 +82,9 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation:2.3.13")
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.13")
 
-    // Markdown rendering — deferred to a later phase to avoid dependency conflicts.
-    // MVP renders assistant responses as plain text; markdown/HTML rendering is a follow-up.
-    implementation("io.noties.markwon:core:4.6.2")
+    // Markdown rendering — delegated to a lightweight in-app renderer (see ui.components.MarkdownText).
+    // Media (image output from markdown URLs / attachments) is loaded with Coil.
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

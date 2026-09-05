@@ -27,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,6 +52,8 @@ import com.naufal.chatbot.model.CustomProvider
 fun SettingsScreen(
     secureKeyStore: SecureKeyStore,
     repository: ChatRepository,
+    darkMode: Boolean,
+    onToggleTheme: () -> Unit,
     onBack: () -> Unit,
     viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(secureKeyStore, repository)
@@ -82,6 +85,25 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)
         ) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Dark Mode", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Switch(
+                            checked = darkMode,
+                            onCheckedChange = { onToggleTheme() }
+                        )
+                    }
+                }
+            }
+
             item {
                 Text(
                     text = "API Keys",
