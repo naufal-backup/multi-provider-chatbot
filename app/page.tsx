@@ -400,6 +400,31 @@ export default function Home() {
     downloadJson(data, `asisten-${name}.json`);
   }
 
+  async function handleExportHtml() {
+    const data = await exportAll();
+    const lines: string[] = [];
+    for (const conv of data.conversations) {
+      lines.push(`<h2>${esc(conv.title)}</h2>`);
+      const msgs = data.messages.filter((m) => m.conversationId === conv.id);
+      for (const m of msgs) {
+        const role = m.role === "user" ? "Kamu" : "AI";
+        const content = esc(m.content).replace(/\n/g, "<br>");
+        lines.push(`<p><strong>${role}:</strong> ${content}</p>`);
+      }
+      lines.push("<hr>");
+    }
+    const html = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>OpenHost Chat</title><style>body{font-family:system-ui;max-width:700px;margin:40px auto;padding:0 20px;line-height:1.6;color:#171717}h2{margin:24px 0 8px}p{margin:6px 0}hr{border:none;border-top:1px solid #e5e5e5;margin:20px 0}strong{color:#111}</style></head><body><h1>OpenHost Chat - Backup</h1>${lines.join("\n")}</body></html>`;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `asisten-chat-${new Date().toISOString().slice(0, 10)}.html`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function esc(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -430,7 +455,7 @@ export default function Home() {
               <path d="M12 12v2M9 18h6"/>
             </svg>
           </div>
-          <div className="brand-name display-font">Asisten</div>
+          <div className="brand-name display-font">OpenHost Chat</div>
           <button className="collapse-btn" title="Minimize" onClick={() => { setCollapsed(!collapsed); setMobileNav(false); }} style={{ marginLeft: "auto" }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
@@ -467,10 +492,11 @@ export default function Home() {
         </div>
 
         <button className="drawer-footer" onClick={() => setSettingsOpen(true)}>
-          <div className="avatar">A</div>
+          <div className="avatar">N</div>
           <div className="footer-text">
-            <strong>Pengguna</strong>
-            Pengaturan & API key
+            <strong>OpenHost Chat</strong>
+            {"by "}
+            <a href="https://github.com/naufal-backup" target="_blank" rel="noopener noreferrer" style={{ color: "var(--md-on-surface)", textDecoration: "underline" }}>Naufal Alamsyah</a>
           </div>
         </button>
       </aside>
@@ -727,7 +753,7 @@ export default function Home() {
               </button>
             )}
           </div>
-          <div className="composer-hint">Asisten dapat membuat kesalahan. Periksa kembali informasi penting.</div>
+          <div className="composer-hint">OpenHost Chat dapat membuat kesalahan. Periksa kembali informasi penting.</div>
         </div>
       </main>
 
@@ -752,6 +778,7 @@ export default function Home() {
           onEditCustom={(cp) => { setEditingCustom(cp); setCustomDialogOpen(true); }}
           onDeleteCustom={async (cp) => { await deleteCustomProviderDb(cp.id); refresh(); }}
           onExportAll={handleExportAll}
+          onExportHtml={handleExportHtml}
           onImport={handleImport}
         />
       )}
@@ -864,6 +891,7 @@ function SettingsDialog({
   onEditCustom,
   onDeleteCustom,
   onExportAll,
+  onExportHtml,
   onImport,
 }: {
   apiKeys: Record<string, boolean>;
@@ -880,6 +908,7 @@ function SettingsDialog({
   onEditCustom: (cp: CustomProvider) => void;
   onDeleteCustom: (cp: CustomProvider) => void;
   onExportAll: () => void;
+  onExportHtml: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -955,16 +984,22 @@ function SettingsDialog({
         </button>
 
         <div className="dlg-section">Backup & Restore</div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn text" onClick={onExportAll}>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-              Export semua
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              Export JSON
+            </span>
+          </button>
+          <button className="btn text" onClick={onExportHtml}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M13 2v7h7"/></svg>
+              Export HTML
             </span>
           </button>
           <label className="btn text" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
-            Import
+            Import JSON
             <input type="file" accept=".json" hidden onChange={onImport} />
           </label>
         </div>
