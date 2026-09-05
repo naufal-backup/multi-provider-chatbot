@@ -1,25 +1,24 @@
-# Multi-Provider Chatbot (Next.js)
+# Multi-Provider Chatbot (Next.js + Cloudflare Workers)
 
 Aplikasi chatbot **web** (Next.js + TypeScript + Tailwind) untuk percakapan dengan berbagai model AI (OpenAI, Anthropic/Claude, Google/Gemini, DeepSeek, dan custom provider) menggunakan **API key milik pengguna sendiri (BYOK)**. Serverless, tanpa login, seluruh data tersimpan **lokal di browser** (IndexedDB).
 
 ## Arsitektur
 
 ```
-[Web App - Next.js]
-   ├── UI (React + Tailwind): Chat, History, Settings
-   ├── IndexedDB: riwayat percakapan, custom providers, API keys (lokal browser)
-   ├── Stream client: fetch SSE dari /api/chat
-   └── API Route /api/chat (serverless, stateless)
-              │
-   ┌──────────┼───────────┬──────────┐
-   ▼          ▼           ▼          ▼
-OpenAI    Anthropic     Google    DeepSeek   (+ custom OpenAI/Claude style)
+[Frontend Worker]  static Next.js (UI)  — multi-provider-chatbot.<akun>.workers.dev
+       │  POST {provider, model, apiKey, messages}
+       ▼
+[API Worker]       serverless proxy    — multi-provider-chatbot-api.<akun>.workers.dev
+       │
+   ┌───┼───────┬─────────┬──────────┐
+   ▼   ▼       ▼         ▼          ▼
+OpenAI Anthropic Google   DeepSeek  (+ custom OpenAI/Claude style)
 ```
 
 - **Full local** — data disimpan di `IndexedDB` browser, tanpa database server.
 - **Tanpa login/akun** — seluruh state milik browser masing-masing pengguna.
-- **BYOK** — API key dikirim dari browser ke API route, tidak disimpan di route.
-- **API route** forward request ke provider AI (server-side, bebas CORS).
+- **BYOK** — API key dikirim dari browser ke API Worker, tidak disimpan di Worker.
+- **Dua Worker** — frontend (static) & API (proxy), keduanya serverless/stateless.
 
 ## Fitur
 
@@ -39,9 +38,12 @@ OpenAI    Anthropic     Google    DeepSeek   (+ custom OpenAI/Claude style)
 ## Struktur Project
 
 ```
-/app            → Next.js App Router (page.tsx, api/chat/route.ts, layout.tsx)
+/app            → Next.js App Router (page.tsx, layout.tsx)
 /components     → React components (Markdown, ThemeProvider)
 /lib            → db.ts (IndexedDB), stream.ts, types.ts
+/workers
+  /frontend     → Cloudflare Worker (serve static UI, binding `assets`)
+  /api          → Cloudflare Worker (proxy ke provider AI, SSE)
 /.github        → GitHub Actions (build + auto-release)
 ```
 
@@ -54,19 +56,33 @@ npm run dev
 
 Buka `http://localhost:3000`.
 
-## Build & Deploy
+## Deploy (Cloudflare Workers)
 
-```bash
-npm run build
-npm start
-```
+Ada **dua** Worker:
 
-**GitHub Actions**: tiap push ke `main` menjalankan build. Build sukses otomatis membuat release `v{n}` + update tag `latest`.
+1. **API Worker** (`/workers/api`) — proxy ke provider AI:
+   ```bash
+   cd workers/api
+   wrangler deploy
+   ```
+   Hasil: `https://multi-provider-chatbot-api.<akun>.workers.dev`
+
+2. **Frontend Worker** (`/workers/frontend`) — serve static Next.js:
+   ```bash
+   # di root, build static export
+   npm run build
+   # lalu deploy
+   cd workers/frontend
+   wrangler deploy
+   ```
+   Hasil: `https://multi-provider-chatbot.<akun>.workers.dev`
+
+   URL API Worker dikonfigurasi di `lib/stream.ts` (`API_URL`), atau lewat env `NEXT_PUBLIC_API_URL` saat build.
 
 ## Catatan
 
-- API key dan riwayat chat tersimpan di browser (IndexedDB) dan hanya ada di perangkat pengguna. Tidak pernah dikirim ke database server manapun.
-- Beberapa provider (DeepSeek, dll.) tidak mendukung CORS langsung dari browser; oleh karena itu panggilan dilakukan melalui API route `/api/chat` (serverless, stateless).
+- API key & riwayat chat hanya di browser (IndexedDB), tidak pernah ke database server.
+- Beberapa provider tidak dukung CORS dari browser; karena itu panggilan lewat API Worker (serverless proxy).
 
 ## Lisensi
 

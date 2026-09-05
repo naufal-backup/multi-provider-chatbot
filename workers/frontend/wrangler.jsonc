@@ -1,0 +1,9 @@
+{
+  "name": "multi-provider-chatbot",
+  "compatibility_date": "2024-12-01",
+  "main": "src/index.ts",
+  "assets": {
+    "directory": "../../out",
+    "binding": "ASSETS"
+  }
+}

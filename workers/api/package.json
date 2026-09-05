@@ -1,0 +1,12 @@
+{
+  "name": "multi-provider-chatbot-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241201.0",
+    "wrangler": "^3.95.0"
+  }
+}
