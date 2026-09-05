@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.naufal.chatbot.Provider
 import com.naufal.chatbot.data.repository.ChatRepository
+import com.naufal.chatbot.model.Attachment
 import com.naufal.chatbot.model.ChatMessage
 import com.naufal.chatbot.model.Conversation
 import com.naufal.chatbot.model.CustomProvider
@@ -13,6 +14,7 @@ import com.naufal.chatbot.model.ProviderSelection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class ChatUiState(
@@ -21,6 +23,7 @@ data class ChatUiState(
     val selection: ProviderSelection = ProviderSelection.BuiltIn(Provider.OPENAI, "gpt-4o-mini"),
     val customProviders: List<CustomProvider> = emptyList(),
     val inputText: String = "",
+    val pendingAttachments: List<Attachment> = emptyList(),
     val isStreaming: Boolean = false,
     val error: String? = null,
     val isInitialized: Boolean = false
@@ -76,7 +79,7 @@ class ChatViewModel(
             )
             repository.getMessages(id).collect { msgs ->
                 _uiState.value = _uiState.value.copy(
-                    messages = msgs.map { ChatMessage(it.role, it.content) }
+                    messages = ChatRepository.jsonToMessages(msgs)
                 )
             }
         }
@@ -116,18 +119,34 @@ class ChatViewModel(
         setSelection(ProviderSelection.Custom(custom))
     }
 
+    fun addAttachment(attachment: Attachment) {
+        _uiState.update { it.copy(pendingAttachments = it.pendingAttachments + attachment) }
+    }
+
+    fun removeAttachmentAt(index: Int) {
+        _uiState.update {
+            it.copy(pendingAttachments = it.pendingAttachments.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    fun clearAttachments() {
+        _uiState.update { it.copy(pendingAttachments = emptyList()) }
+    }
+
     fun sendMessage() {
         val text = _uiState.value.inputText.trim()
+        val attachments = _uiState.value.pendingAttachments
         val conv = _uiState.value.conversation ?: return
-        if (text.isEmpty() || _uiState.value.isStreaming) return
+        if ((text.isEmpty() && attachments.isEmpty()) || _uiState.value.isStreaming) return
 
         val selection = _uiState.value.selection
-        val userMessage = ChatMessage("user", text)
+        val userMessage = ChatMessage("user", text, attachments)
         val assistantPlaceholder = ChatMessage("assistant", "")
 
         _uiState.value = _uiState.value.copy(
             messages = _uiState.value.messages + userMessage + assistantPlaceholder,
             inputText = "",
+            pendingAttachments = emptyList(),
             isStreaming = true,
             error = null
         )
@@ -139,13 +158,15 @@ class ChatViewModel(
                         conversationId = conv.id,
                         role = "user",
                         content = text,
+                        attachmentsJson = ChatRepository.attachmentsToJson(attachments),
                         createdAt = System.currentTimeMillis()
                     )
                 )
 
+                val allMessages = _uiState.value.messages + userMessage
                 val stream = repository.streamChat(
                     selection = selection,
-                    messages = _uiState.value.messages + userMessage
+                    messages = allMessages
                 )
 
                 val sb = StringBuilder()

@@ -25,7 +25,29 @@ class AnthropicClient(private val baseUrl: String = "https://api.anthropic.com/v
                 rest.forEach { m ->
                     addJsonObject {
                         put("role", m.role)
-                        put("content", m.content)
+                        if (m.attachments.isEmpty()) {
+                            put("content", m.content)
+                        } else {
+                            put("content", buildJsonArray {
+                                if (m.content.isNotBlank()) {
+                                    addJsonObject {
+                                        put("type", "text")
+                                        put("text", m.content)
+                                    }
+                                }
+                                m.attachments.filter { it.type == "image" && it.dataBase64 != null }
+                                    .forEach { att ->
+                                        addJsonObject {
+                                            put("type", "image")
+                                            put("source", buildJsonObject {
+                                                put("type", "base64")
+                                                put("media_type", att.mimeType)
+                                                put("data", att.dataBase64)
+                                            })
+                                        }
+                                    }
+                            })
+                        }
                     }
                 }
             })

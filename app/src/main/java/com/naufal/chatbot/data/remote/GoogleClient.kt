@@ -22,7 +22,19 @@ class GoogleClient : ProviderClient {
                     addJsonObject {
                         put("role", if (m.role == "assistant") "model" else "user")
                         put("parts", buildJsonArray {
-                            addJsonObject { put("text", m.content) }
+                            if (m.content.isNotBlank()) {
+                                addJsonObject { put("text", m.content) }
+                            }
+                            m.attachments.forEach { att ->
+                                if (att.type == "image" && att.dataBase64 != null) {
+                                    addJsonObject {
+                                        put("inline_data", buildJsonObject {
+                                            put("mime_type", att.mimeType)
+                                            put("data", att.dataBase64)
+                                        })
+                                    }
+                                }
+                            }
                         })
                     }
                 }

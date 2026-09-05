@@ -9,6 +9,7 @@ import com.naufal.chatbot.data.local.MessageDao
 import com.naufal.chatbot.data.local.MessageEntity
 import com.naufal.chatbot.data.local.SecureKeyStore
 import com.naufal.chatbot.data.remote.ChatApiService
+import com.naufal.chatbot.model.Attachment
 import com.naufal.chatbot.model.ChatMessage
 import com.naufal.chatbot.model.Conversation
 import com.naufal.chatbot.model.CustomKind
@@ -17,6 +18,9 @@ import com.naufal.chatbot.model.Message
 import com.naufal.chatbot.model.ProviderSelection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 class ChatRepository(
@@ -101,9 +105,14 @@ class ChatRepository(
                 conversationId = message.conversationId,
                 role = message.role,
                 content = message.content,
+                attachmentsJson = message.attachmentsJson,
                 createdAt = message.createdAt
             )
         )
+    }
+
+    suspend fun saveMessages(messages: List<Message>) {
+        messages.forEach { saveMessage(it) }
     }
 
     // ---- Custom providers ----
@@ -222,6 +231,26 @@ class ChatRepository(
         conversationId = conversationId,
         role = role,
         content = content,
+        attachmentsJson = attachmentsJson,
         createdAt = createdAt
     )
+
+    companion object {
+        private val json = Json { ignoreUnknownKeys = true }
+
+        fun attachmentsToJson(attachments: List<Attachment>): String? =
+            if (attachments.isEmpty()) null else json.encodeToString(attachments)
+
+        fun jsonToMessages(messages: List<Message>): List<ChatMessage> =
+            messages.map { m ->
+                val atts = m.attachmentsJson?.let {
+                    try {
+                        json.decodeFromString<List<Attachment>>(it)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                } ?: emptyList()
+                ChatMessage(m.role, m.content, atts)
+            }
+    }
 }

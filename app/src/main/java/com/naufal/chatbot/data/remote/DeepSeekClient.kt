@@ -25,7 +25,27 @@ class DeepSeekClient : ProviderClient {
                 messages.forEach { m ->
                     addJsonObject {
                         put("role", m.role)
-                        put("content", m.content)
+                        if (m.attachments.isEmpty()) {
+                            put("content", m.content)
+                        } else {
+                            put("content", buildJsonArray {
+                                if (m.content.isNotBlank()) {
+                                    addJsonObject {
+                                        put("type", "text")
+                                        put("text", m.content)
+                                    }
+                                }
+                                m.attachments.filter { it.type == "image" && it.dataBase64 != null }
+                                    .forEach { att ->
+                                        addJsonObject {
+                                            put("type", "image_url")
+                                            put("image_url", buildJsonObject {
+                                                put("url", "data:${att.mimeType};base64,${att.dataBase64}")
+                                            })
+                                        }
+                                    }
+                            })
+                        }
                     }
                 }
             })
