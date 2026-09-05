@@ -12,6 +12,7 @@ import {
   type CustomProvider,
   type ProviderSelection,
 } from "@/lib/types";
+import { getCavemanPrompt, type CavemanLevel } from "@/lib/caveman";
 import {
   addMessage,
   deleteConversation,
@@ -59,6 +60,8 @@ export default function Home() {
   const [editingCustom, setEditingCustom] = useState<CustomProvider | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [cavemanEnabled, setCavemanEnabled] = useState(false);
+  const [cavemanLevel, setCavemanLevel] = useState<CavemanLevel>("full");
   const [retryPayload, setRetryPayload] = useState<{
     text: string;
     attachments: Attachment[];
@@ -81,6 +84,21 @@ export default function Home() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
+
+  useEffect(() => {
+    const ce = localStorage.getItem("cavemanEnabled");
+    const cl = localStorage.getItem("cavemanLevel") as CavemanLevel | null;
+    if (ce !== null) setCavemanEnabled(ce === "true");
+    if (cl && ["lite", "full", "ultra"].includes(cl)) setCavemanLevel(cl);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("cavemanEnabled", String(cavemanEnabled));
+  }, [cavemanEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem("cavemanLevel", cavemanLevel);
+  }, [cavemanLevel]);
 
   async function persistModelForSession(
     convId: string,
@@ -195,12 +213,15 @@ export default function Home() {
 
     let full = "";
     try {
+      const outMessages: ChatMessage[] = cavemanEnabled
+        ? [{ role: "system", content: getCavemanPrompt(cavemanLevel) }, ...messages.concat(userMsg)]
+        : messages.concat(userMsg);
       await streamChat(
         {
           provider: selection.kind === "builtin" ? selection.provider : selection.provider.kind,
           model: selection.model,
           apiKey,
-          messages: messages.concat(userMsg).map(({ role, content, attachments }) => ({ role, content, attachments })),
+          messages: outMessages.map(({ role, content, attachments }) => ({ role, content, attachments })),
           custom: selection.kind === "custom",
           kind: selection.kind === "custom" ? selection.provider.kind : undefined,
           baseUrl: selection.kind === "custom" ? selection.provider.baseUrl : undefined,
@@ -382,6 +403,18 @@ export default function Home() {
               )}
             </button>
 
+            <button
+              className="icon-btn"
+              title={cavemanEnabled ? `Caveman ${cavemanLevel} — tap to off` : "Caveman off — tap to on"}
+              onClick={() => setCavemanEnabled((v) => !v)}
+              style={cavemanEnabled ? { background: "var(--md-primary-container)", color: "var(--md-on-primary-container)", borderColor: "var(--md-primary)" } : undefined}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M7 14l2-6 3 4 2-3 3 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M4 16l2 2 3-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+
             <button className="icon-btn" title="Pengaturan" onClick={() => setSettingsOpen(true)}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </button>
@@ -501,6 +534,10 @@ export default function Home() {
           customProviders={customProviders}
           dark={dark}
           onToggleTheme={toggle}
+          cavemanEnabled={cavemanEnabled}
+          cavemanLevel={cavemanLevel}
+          onToggleCaveman={() => setCavemanEnabled((v) => !v)}
+          onSetCavemanLevel={setCavemanLevel}
           onClose={() => { setSettingsOpen(false); refresh(); }}
           onSaveKey={async (provider, key) => {
             if (key.trim()) await setApiKey(provider, key.trim());
@@ -564,6 +601,10 @@ function SettingsDialog({
   customProviders,
   dark,
   onToggleTheme,
+  cavemanEnabled,
+  cavemanLevel,
+  onToggleCaveman,
+  onSetCavemanLevel,
   onClose,
   onSaveKey,
   onOpenCustom,
@@ -574,6 +615,10 @@ function SettingsDialog({
   customProviders: CustomProvider[];
   dark: boolean;
   onToggleTheme: () => void;
+  cavemanEnabled: boolean;
+  cavemanLevel: import("@/lib/caveman").CavemanLevel;
+  onToggleCaveman: () => void;
+  onSetCavemanLevel: (l: import("@/lib/caveman").CavemanLevel) => void;
   onClose: () => void;
   onSaveKey: (provider: string, key: string) => void;
   onOpenCustom: () => void;
@@ -594,6 +639,21 @@ function SettingsDialog({
           <span>Mode gelap</span>
           <button className={`toggle ${dark ? "on" : ""}`} onClick={onToggleTheme}></button>
         </div>
+
+        <div className="switch-row" style={{ marginTop: 8 }}>
+          <span>Caveman mode {cavemanEnabled ? `(${cavemanLevel})` : ""}</span>
+          <button className={`toggle ${cavemanEnabled ? "on" : ""}`} onClick={onToggleCaveman}></button>
+        </div>
+        {cavemanEnabled && (
+          <div className="field" style={{ marginTop: 8 }}>
+            <label>Tingkat</label>
+            <select value={cavemanLevel} onChange={(e) => onSetCavemanLevel(e.target.value as any)}>
+              <option value="lite">lite — no filler, full sentences</option>
+              <option value="full">full — classic caveman</option>
+              <option value="ultra">ultra — max terse</option>
+            </select>
+          </div>
+        )}
 
         <div className="dlg-section">API Keys</div>
         {BUILTIN_PROVIDERS.map((p) => (
