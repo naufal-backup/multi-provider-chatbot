@@ -65,7 +65,8 @@ fun MainScreen() {
             composable("chat") {
                 ChatScreen(
                     repository = repository,
-                    onNewChat = { navigate("chat") },
+                    onNewChat = { navController.navigate("chat") },
+                    onOpenHistory = { navigate("history") },
                     onOpenSettings = { navigate("settings") }
                 )
             }
@@ -84,6 +85,7 @@ fun MainScreen() {
                 ChatScreen(
                     repository = repository,
                     onNewChat = { navController.navigate("chat") },
+                    onOpenHistory = { navigate("history") },
                     onOpenSettings = { navigate("settings") },
                     conversationId = id
                 )

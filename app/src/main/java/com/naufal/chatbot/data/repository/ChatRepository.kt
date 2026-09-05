@@ -14,6 +14,7 @@ import com.naufal.chatbot.model.Conversation
 import com.naufal.chatbot.model.CustomKind
 import com.naufal.chatbot.model.CustomProvider
 import com.naufal.chatbot.model.Message
+import com.naufal.chatbot.model.ProviderSelection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -50,6 +51,25 @@ class ChatRepository(
             title = title,
             provider = provider.key,
             model = model,
+            customProviderId = null,
+            createdAt = now,
+            updatedAt = now
+        )
+        conversationDao.upsertConversation(entity)
+        return entity.toDomain()
+    }
+
+    suspend fun createConversationCustom(
+        title: String,
+        custom: CustomProvider
+    ): Conversation {
+        val now = System.currentTimeMillis()
+        val entity = ConversationEntity(
+            id = UUID.randomUUID().toString(),
+            title = title,
+            provider = custom.kind.name.lowercase(), // placeholder for display; custom id takes precedence
+            model = custom.model,
+            customProviderId = custom.id,
             createdAt = now,
             updatedAt = now
         )
@@ -64,6 +84,7 @@ class ChatRepository(
                 title = conversation.title,
                 provider = conversation.provider.key,
                 model = conversation.model,
+                customProviderId = conversation.customProviderId,
                 createdAt = conversation.createdAt,
                 updatedAt = conversation.updatedAt
             )
@@ -176,11 +197,22 @@ class ChatRepository(
         return apiService.streamChat(provider, apiKey, model, messages)
     }
 
+    suspend fun streamChat(
+        selection: ProviderSelection,
+        messages: List<ChatMessage>
+    ): Flow<String> = when (selection) {
+        is ProviderSelection.BuiltIn ->
+            streamChat(selection.provider, selection.model, messages)
+        is ProviderSelection.Custom ->
+            streamChatCustom(selection.provider, messages)
+    }
+
     private fun ConversationEntity.toDomain() = Conversation(
         id = id,
         title = title,
         provider = Provider.fromKey(provider),
         model = model,
+        customProviderId = customProviderId,
         createdAt = createdAt,
         updatedAt = updatedAt
     )

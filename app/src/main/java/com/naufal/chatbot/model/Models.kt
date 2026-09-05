@@ -7,6 +7,7 @@ data class Conversation(
     val title: String,
     val provider: Provider,
     val model: String,
+    val customProviderId: String? = null,
     val createdAt: Long,
     val updatedAt: Long
 )
@@ -37,3 +38,14 @@ data class CustomProvider(
     val model: String,
     val createdAt: Long
 )
+
+sealed class ProviderSelection {
+    data class BuiltIn(val provider: Provider, val model: String) : ProviderSelection()
+    data class Custom(val provider: CustomProvider) : ProviderSelection()
+
+    val displayName: String
+        get() = when (this) {
+            is BuiltIn -> provider.displayName
+            is Custom -> provider.name
+        }
+}

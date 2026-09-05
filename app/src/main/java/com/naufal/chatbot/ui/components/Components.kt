@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.naufal.chatbot.Provider
 import com.naufal.chatbot.model.ChatMessage
+import com.naufal.chatbot.model.CustomProvider
+import com.naufal.chatbot.model.ProviderSelection
 
 @Composable
 fun MessageBubble(message: ChatMessage) {
@@ -59,20 +61,10 @@ fun MessageBubble(message: ChatMessage) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProviderModelSelector(
-    selectedProvider: Provider,
-    selectedModel: String,
-    onProviderChange: (Provider) -> Unit,
-    onModelChange: (String) -> Unit
+    selection: ProviderSelection,
+    customProviders: List<CustomProvider>,
+    onSelectionChange: (ProviderSelection) -> Unit
 ) {
-    val models = remember(selectedProvider) {
-        when (selectedProvider) {
-            Provider.OPENAI -> listOf("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo")
-            Provider.ANTHROPIC -> listOf("claude-3-5-sonnet-20241022", "claude-3-haiku-20240307")
-            Provider.GOOGLE -> listOf("gemini-1.5-flash", "gemini-1.5-pro")
-            Provider.DEEPSEEK -> listOf("deepseek-chat", "deepseek-reasoner")
-        }
-    }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -87,7 +79,7 @@ fun ProviderModelSelector(
             modifier = Modifier.weight(1f)
         ) {
             OutlinedTextField(
-                value = selectedProvider.displayName,
+                value = selection.displayName,
                 onValueChange = {},
                 readOnly = true,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
@@ -103,12 +95,27 @@ fun ProviderModelSelector(
                     DropdownMenuItem(
                         text = { Text(provider.displayName) },
                         onClick = {
-                            onProviderChange(provider)
+                            val model = defaultModelFor(provider)
+                            onSelectionChange(ProviderSelection.BuiltIn(provider, model))
+                            providerExpanded = false
+                        }
+                    )
+                }
+                customProviders.forEach { custom ->
+                    DropdownMenuItem(
+                        text = { Text(custom.name) },
+                        onClick = {
+                            onSelectionChange(ProviderSelection.Custom(custom))
                             providerExpanded = false
                         }
                     )
                 }
             }
+        }
+
+        val models = when (selection) {
+            is ProviderSelection.BuiltIn -> modelsFor(selection.provider)
+            is ProviderSelection.Custom -> listOf(selection.provider.model)
         }
 
         var modelExpanded by remember { mutableStateOf(false) }
@@ -119,7 +126,10 @@ fun ProviderModelSelector(
             modifier = Modifier.weight(1f)
         ) {
             OutlinedTextField(
-                value = selectedModel,
+                value = when (selection) {
+                    is ProviderSelection.BuiltIn -> selection.model
+                    is ProviderSelection.Custom -> selection.provider.model
+                },
                 onValueChange = {},
                 readOnly = true,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded) },
@@ -135,7 +145,10 @@ fun ProviderModelSelector(
                     DropdownMenuItem(
                         text = { Text(model) },
                         onClick = {
-                            onModelChange(model)
+                            val current = selection
+                            if (current is ProviderSelection.BuiltIn) {
+                                onSelectionChange(current.copy(model = model))
+                            }
                             modelExpanded = false
                         }
                     )
@@ -143,4 +156,18 @@ fun ProviderModelSelector(
             }
         }
     }
+}
+
+private fun defaultModelFor(provider: Provider): String = when (provider) {
+    Provider.OPENAI -> "gpt-4o-mini"
+    Provider.ANTHROPIC -> "claude-3-5-sonnet-20241022"
+    Provider.GOOGLE -> "gemini-1.5-flash"
+    Provider.DEEPSEEK -> "deepseek-chat"
+}
+
+private fun modelsFor(provider: Provider): List<String> = when (provider) {
+    Provider.OPENAI -> listOf("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo")
+    Provider.ANTHROPIC -> listOf("claude-3-5-sonnet-20241022", "claude-3-haiku-20240307")
+    Provider.GOOGLE -> listOf("gemini-1.5-flash", "gemini-1.5-pro")
+    Provider.DEEPSEEK -> listOf("deepseek-chat", "deepseek-reasoner")
 }

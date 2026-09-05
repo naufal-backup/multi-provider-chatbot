@@ -6,19 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.naufal.chatbot.Provider
 import com.naufal.chatbot.data.repository.ChatRepository
 import com.naufal.chatbot.model.ChatMessage
-import com.naufal.chatbot.model.Message
 import com.naufal.chatbot.model.Conversation
+import com.naufal.chatbot.model.CustomProvider
+import com.naufal.chatbot.model.Message
+import com.naufal.chatbot.model.ProviderSelection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 data class ChatUiState(
     val conversation: Conversation? = null,
     val messages: List<ChatMessage> = emptyList(),
-    val selectedProvider: Provider = Provider.OPENAI,
-    val selectedModel: String = "gpt-4o-mini",
+    val selection: ProviderSelection = ProviderSelection.BuiltIn(Provider.OPENAI, "gpt-4o-mini"),
+    val customProviders: List<CustomProvider> = emptyList(),
     val inputText: String = "",
     val isStreaming: Boolean = false,
     val error: String? = null,
@@ -32,6 +33,14 @@ class ChatViewModel(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            repository.getAllCustomProviders().collect { providers ->
+                _uiState.value = _uiState.value.copy(customProviders = providers)
+            }
+        }
+    }
+
     fun initialize(provider: Provider, model: String) {
         if (_uiState.value.isInitialized) return
         viewModelScope.launch {
@@ -42,8 +51,7 @@ class ChatViewModel(
             )
             _uiState.value = _uiState.value.copy(
                 conversation = conv,
-                selectedProvider = provider,
-                selectedModel = model,
+                selection = ProviderSelection.BuiltIn(provider, model),
                 isInitialized = true
             )
         }
@@ -53,10 +61,17 @@ class ChatViewModel(
         if (_uiState.value.isInitialized) return
         viewModelScope.launch {
             val conversation = repository.getConversationById(id) ?: return@launch
+            val selection = if (conversation.customProviderId != null) {
+                _uiState.value.customProviders
+                    .firstOrNull { it.id == conversation.customProviderId }
+                    ?.let { ProviderSelection.Custom(it) }
+                    ?: ProviderSelection.BuiltIn(conversation.provider, conversation.model)
+            } else {
+                ProviderSelection.BuiltIn(conversation.provider, conversation.model)
+            }
             _uiState.value = _uiState.value.copy(
                 conversation = conversation,
-                selectedProvider = conversation.provider,
-                selectedModel = conversation.model,
+                selection = selection,
                 isInitialized = true
             )
             repository.getMessages(id).collect { msgs ->
@@ -68,31 +83,37 @@ class ChatViewModel(
     }
 
     fun loadConversation(conversation: Conversation) {
-        _uiState.value = _uiState.value.copy(
-            conversation = conversation,
-            selectedProvider = conversation.provider,
-            selectedModel = conversation.model,
-            isInitialized = true
-        )
-        viewModelScope.launch {
-            repository.getMessages(conversation.id).collect { msgs ->
-                _uiState.value = _uiState.value.copy(
-                    messages = msgs.map { ChatMessage(it.role, it.content) }
-                )
-            }
-        }
+        _uiState.value = _uiState.value.copy(isInitialized = false)
+        loadConversationById(conversation.id)
     }
 
     fun setInputText(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
     }
 
+    fun setSelection(selection: ProviderSelection) {
+        _uiState.value = _uiState.value.copy(selection = selection)
+    }
+
     fun setProvider(provider: Provider) {
-        _uiState.value = _uiState.value.copy(selectedProvider = provider)
+        val model = when (provider) {
+            Provider.OPENAI -> "gpt-4o-mini"
+            Provider.ANTHROPIC -> "claude-3-5-sonnet-20241022"
+            Provider.GOOGLE -> "gemini-1.5-flash"
+            Provider.DEEPSEEK -> "deepseek-chat"
+        }
+        setSelection(ProviderSelection.BuiltIn(provider, model))
     }
 
     fun setModel(model: String) {
-        _uiState.value = _uiState.value.copy(selectedModel = model)
+        val current = _uiState.value.selection
+        if (current is ProviderSelection.BuiltIn) {
+            setSelection(current.copy(model = model))
+        }
+    }
+
+    fun setCustomProvider(custom: CustomProvider) {
+        setSelection(ProviderSelection.Custom(custom))
     }
 
     fun sendMessage() {
@@ -100,6 +121,7 @@ class ChatViewModel(
         val conv = _uiState.value.conversation ?: return
         if (text.isEmpty() || _uiState.value.isStreaming) return
 
+        val selection = _uiState.value.selection
         val userMessage = ChatMessage("user", text)
         val assistantPlaceholder = ChatMessage("assistant", "")
 
@@ -112,7 +134,6 @@ class ChatViewModel(
 
         viewModelScope.launch {
             try {
-                // Save user message
                 repository.saveMessage(
                     Message(
                         conversationId = conv.id,
@@ -123,8 +144,7 @@ class ChatViewModel(
                 )
 
                 val stream = repository.streamChat(
-                    provider = _uiState.value.selectedProvider,
-                    model = _uiState.value.selectedModel,
+                    selection = selection,
                     messages = _uiState.value.messages + userMessage
                 )
 
@@ -136,7 +156,6 @@ class ChatViewModel(
                     _uiState.value = _uiState.value.copy(messages = msgs)
                 }
 
-                // Save assistant message
                 repository.saveMessage(
                     Message(
                         conversationId = conv.id,
@@ -146,7 +165,6 @@ class ChatViewModel(
                     )
                 )
 
-                // Auto-rename conversation with first user message
                 if (_uiState.value.messages.size <= 2) {
                     val title = text.take(50) + if (text.length > 50) "..." else ""
                     repository.renameConversation(conv.id, title)
@@ -160,7 +178,6 @@ class ChatViewModel(
                     error = e.message ?: "Unknown error",
                     isStreaming = false
                 )
-                // Remove the empty assistant placeholder
                 val msgs = _uiState.value.messages.toMutableList()
                 if (msgs.isNotEmpty()) msgs.removeAt(msgs.size - 1)
                 _uiState.value = _uiState.value.copy(messages = msgs)

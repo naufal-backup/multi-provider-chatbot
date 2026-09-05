@@ -10,6 +10,7 @@ data class ConversationEntity(
     val title: String,
     val provider: String,
     val model: String,
+    val customProviderId: String? = null,
     val createdAt: Long,
     val updatedAt: Long
 )

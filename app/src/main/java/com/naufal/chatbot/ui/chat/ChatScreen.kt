@@ -16,7 +16,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -52,6 +55,7 @@ import com.naufal.chatbot.ui.components.ProviderModelSelector
 fun ChatScreen(
     repository: ChatRepository,
     onNewChat: () -> Unit,
+    onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit,
     conversationId: String? = null,
     initialProvider: Provider = Provider.OPENAI,
@@ -84,7 +88,7 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(
-                            text = uiState.selectedProvider.displayName,
+                            text = uiState.selection.displayName,
                             style = MaterialTheme.typography.titleMedium
                         )
                         uiState.conversation?.let {
@@ -97,14 +101,14 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenHistory) {
+                        Icon(Icons.Default.History, contentDescription = "History")
+                    }
                     IconButton(onClick = onNewChat) {
                         Icon(Icons.Default.Add, contentDescription = "New chat")
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            Icons.Default.Add, // placeholder — will use Settings icon
-                            contentDescription = "Settings"
-                        )
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
                 }
             )
@@ -117,10 +121,9 @@ fun ChatScreen(
         ) {
             // Provider & model selector
             ProviderModelSelector(
-                selectedProvider = uiState.selectedProvider,
-                selectedModel = uiState.selectedModel,
-                onProviderChange = { viewModel.setProvider(it) },
-                onModelChange = { viewModel.setModel(it) }
+                selection = uiState.selection,
+                customProviders = uiState.customProviders,
+                onSelectionChange = { viewModel.setSelection(it) }
             )
 
             // Messages
