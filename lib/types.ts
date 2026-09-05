@@ -31,13 +31,22 @@ export interface CustomProvider {
   name: string;
   kind: CustomKind;
   baseUrl: string;
-  model: string;
+  models: string[];        // multiple models per custom provider
+  /** legacy field for migration from older single-model records */
+  model?: string;
   createdAt: number;
+}
+
+export function normalizeCustomProvider(cp: CustomProvider): CustomProvider {
+  if (!cp.models || cp.models.length === 0) {
+    return { ...cp, models: cp.model ? [cp.model] : ["custom-model"] };
+  }
+  return cp;
 }
 
 export type ProviderSelection =
   | { kind: "builtin"; provider: ProviderKey; model: string }
-  | { kind: "custom"; provider: CustomProvider };
+  | { kind: "custom"; provider: CustomProvider; model: string };
 
 export interface BuiltinProviderInfo {
   key: ProviderKey;

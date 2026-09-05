@@ -114,10 +114,26 @@ export async function addMessage(message: {
 
 // ---- Custom providers ----
 
+function normalizeCustomList(list: CustomProvider[]): CustomProvider[] {
+  return list.map((cp: any) => {
+    if (Array.isArray(cp.models) && cp.models.length > 0) return cp as CustomProvider;
+    const fallback = cp.model ? [cp.model] : ["custom-model"];
+    return { ...cp, models: fallback } as CustomProvider;
+  });
+}
+
 export async function getAllCustomProviders(): Promise<CustomProvider[]> {
   const db = await getDB();
   const all = await db.getAll("customProviders");
-  return all.sort((a, b) => a.createdAt - b.createdAt);
+  const normalized = normalizeCustomList(all as any);
+  // lazy migrate old single-model records
+  for (let i = 0; i < all.length; i++) {
+    const raw: any = all[i];
+    if (!Array.isArray(raw.models) || raw.models.length === 0) {
+      await db.put("customProviders", normalized[i]);
+    }
+  }
+  return normalized.sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export async function upsertCustomProvider(p: CustomProvider): Promise<void> {

@@ -57,6 +57,8 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [editingCustom, setEditingCustom] = useState<CustomProvider | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
   const [retryPayload, setRetryPayload] = useState<{
     text: string;
     attachments: Attachment[];
@@ -80,14 +82,45 @@ export default function Home() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
+  async function persistModelForSession(
+    convId: string,
+    sel: ProviderSelection
+  ) {
+    const conv = await getConversation(convId);
+    if (!conv) return;
+    const next: Conversation = {
+      ...conv,
+      provider: sel.kind === "builtin" ? sel.provider : "openai",
+      model: sel.model,
+      customProviderId: sel.kind === "custom" ? sel.provider.id : null,
+      updatedAt: Date.now(),
+    };
+    await upsertConversation(next);
+    setConversations((prev) =>
+      prev.map((c) => (c.id === convId ? next : c))
+    );
+  }
+
   async function loadConversation(id: string) {
     const conv = await getConversation(id);
     if (!conv) return;
     setActiveConvId(id);
     if (conv.customProviderId) {
       const cp = customProviders.find((c) => c.id === conv.customProviderId);
-      if (cp) setSelection({ kind: "custom", provider: cp });
-      else setSelection({ kind: "builtin", provider: conv.provider, model: conv.model });
+      if (cp) {
+        // sesi menyimpan model terakhir — pakai conv.model, fallback models[0]
+        const savedModel = conv.model;
+        const list: string[] =
+          Array.isArray((cp as any).models) && (cp as any).models.length
+            ? (cp as any).models
+            : cp.model
+            ? [cp.model]
+            : ["custom-model"];
+        const m = list.includes(savedModel) ? savedModel : list[0];
+        setSelection({ kind: "custom", provider: cp as any, model: m });
+      } else {
+        setSelection({ kind: "builtin", provider: conv.provider, model: conv.model });
+      }
     } else {
       setSelection({ kind: "builtin", provider: conv.provider, model: conv.model });
     }
@@ -113,7 +146,7 @@ export default function Home() {
       id: crypto.randomUUID(),
       title: "Percakapan baru",
       provider: selection.kind === "builtin" ? selection.provider : "openai",
-      model: selection.kind === "builtin" ? selection.model : selection.provider.model,
+      model: selection.model,
       customProviderId: selection.kind === "custom" ? selection.provider.id : null,
       createdAt: now,
       updatedAt: now,
@@ -165,7 +198,7 @@ export default function Home() {
       await streamChat(
         {
           provider: selection.kind === "builtin" ? selection.provider : selection.provider.kind,
-          model: selection.kind === "builtin" ? selection.model : selection.provider.model,
+          model: selection.model,
           apiKey,
           messages: messages.concat(userMsg).map(({ role, content, attachments }) => ({ role, content, attachments })),
           custom: selection.kind === "custom",
@@ -221,17 +254,20 @@ export default function Home() {
     conversations.find((c) => c.id === activeConvId)?.title ?? "Percakapan baru";
 
   return (
-    <div className="app">
+    <div className={`app ${collapsed ? "collapsed" : ""}`}>
       {/* Sidebar */}
-      <aside className="drawer">
+      <aside className={`drawer ${mobileNav ? "open" : ""}`}>
         <div className="brand">
           <div className="brand-mark"></div>
           <div className="brand-name display-font">Asisten</div>
+          <button className="collapse-btn" title={collapsed ? "Expand" : "Minimize"} onClick={() => { setCollapsed(!collapsed); setMobileNav(false); }} style={{ marginLeft: "auto" }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d={collapsed ? "M9 18l6-6-6-6" : "M15 18l-6-6 6-6"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
         </div>
 
-        <button className="new-chat-btn" onClick={newConversation}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-          Percakapan baru
+        <button className="new-chat-btn" onClick={newConversation} title="Percakapan baru">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          <span>Percakapan baru</span>
         </button>
 
         <div className="nav-section-label">Terbaru</div>
@@ -239,7 +275,8 @@ export default function Home() {
           <button
             key={c.id}
             className={`nav-item ${c.id === activeConvId ? "active" : ""}`}
-            onClick={() => loadConversation(c.id)}
+            onClick={() => { loadConversation(c.id); setMobileNav(false); }}
+            title={c.title}
           >
             <span>{c.title}</span>
             <span
@@ -252,7 +289,7 @@ export default function Home() {
                 refresh();
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </span>
           </button>
         ))}
@@ -265,11 +302,18 @@ export default function Home() {
           </div>
         </button>
       </aside>
+      {mobileNav && <div className="overlay" style={{ background: "rgba(0,0,0,0.16)" }} onClick={() => setMobileNav(false)}></div>}
 
       {/* Main */}
       <main className="main">
         <div className="topbar">
           <div className="topbar-left">
+            <button className="collapse-btn" title={collapsed ? "Expand sidebar" : "Minimize sidebar"} onClick={() => setCollapsed(!collapsed)} style={{ display: collapsed ? "flex" : "none" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <button className="icon-btn" title="Menu" onClick={() => setMobileNav(!mobileNav)} style={{ display: "none" }} id="mobile-menu">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+            </button>
             <div className="topbar-title display-font">{currentTitle}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -279,12 +323,20 @@ export default function Home() {
                 value={selection.kind === "builtin" ? `builtin:${selection.provider}` : `custom:${selection.provider.id}`}
                 onChange={(e) => {
                   const val = e.target.value;
+                  let next: ProviderSelection | null = null;
                   if (val.startsWith("custom:")) {
                     const cp = customProviders.find((c) => c.id === val.slice(7));
-                    if (cp) setSelection({ kind: "custom", provider: cp });
+                    if (cp) {
+                      const list: string[] = Array.isArray((cp as any).models) && (cp as any).models.length ? (cp as any).models : cp.model ? [cp.model] : ["custom-model"];
+                      next = { kind: "custom", provider: cp as any, model: list[0] };
+                    }
                   } else {
                     const provider = val.slice(8) as any;
-                    setSelection({ kind: "builtin", provider, model: defaultModelFor(provider) });
+                    next = { kind: "builtin", provider, model: defaultModelFor(provider) };
+                  }
+                  if (next) {
+                    setSelection(next);
+                    if (activeConvId) persistModelForSession(activeConvId, next);
                   }
                 }}
               >
@@ -295,26 +347,31 @@ export default function Home() {
                   <option key={cp.id} value={`custom:${cp.id}`}>{cp.name}</option>
                 ))}
               </select>
+              <span className="pill-caret" aria-hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </span>
             </div>
 
             <div className="model-pill">
               <select
-                value={selection.kind === "builtin" ? selection.model : selection.provider.model}
+                value={selection.model}
                 onChange={(e) => {
-                  if (selection.kind === "builtin") {
-                    setSelection({ ...selection, model: e.target.value });
-                  }
+                  const v = e.target.value;
+                  const next: ProviderSelection = selection.kind === "builtin" ? { ...selection, model: v } : { ...selection, model: v };
+                  setSelection(next);
+                  if (activeConvId) persistModelForSession(activeConvId, next);
                 }}
-                disabled={selection.kind === "custom"}
               >
-                {selection.kind === "builtin" &&
-                  (BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.models ?? []).map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                {selection.kind === "custom" && (
-                  <option value={selection.provider.model}>{selection.provider.model}</option>
-                )}
+                {(selection.kind === "builtin"
+                  ? (BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.models ?? [])
+                  : (((selection as any).provider?.models as string[] | undefined) ?? ((selection as any).provider?.model ? [(selection as any).provider.model as string] : []))
+                ).map((m: string) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
               </select>
+              <span className="pill-caret" aria-hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </span>
             </div>
 
             <button className="icon-btn" title="Mode" onClick={toggle}>
@@ -467,9 +524,9 @@ export default function Home() {
               name: data.name,
               kind: data.kind,
               baseUrl: data.baseUrl,
-              model: data.model,
+              models: data.models,
               createdAt: editingCustom?.createdAt ?? Date.now(),
-            });
+            } as any);
             if (data.apiKey.trim()) await setApiKey(`custom_${id}`, data.apiKey.trim());
             setCustomDialogOpen(false);
             setEditingCustom(null);
@@ -558,22 +615,24 @@ function SettingsDialog({
         ))}
 
         <div className="dlg-section">Custom Providers</div>
-        {customProviders.map((cp) => (
+        {customProviders.map((cp) => {
+          const list: string[] = Array.isArray((cp as any).models) && (cp as any).models.length ? (cp as any).models : cp.model ? [cp.model] : [];
+          return (
           <div className="provider-row" key={cp.id}>
             <div className="p-info">
               {cp.name}
-              <small>{cp.kind} · {cp.model}</small>
+              <small>{cp.kind} · {list.join(", ") || "—"}</small>
             </div>
             <div className="p-actions">
               <button title="Edit" onClick={() => onEditCustom(cp)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
               <button className="danger" title="Hapus" onClick={() => onDeleteCustom(cp)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </div>
           </div>
-        ))}
+        );})}
         <button className="btn text" style={{ marginTop: 8 }} onClick={onOpenCustom}>
           + Tambah custom provider
         </button>
@@ -593,13 +652,26 @@ function CustomProviderDialog({
 }: {
   existing: CustomProvider | null;
   onClose: () => void;
-  onSave: (data: { name: string; kind: "openai" | "claude"; baseUrl: string; model: string; apiKey: string }) => void;
+  onSave: (data: { name: string; kind: "openai" | "claude"; baseUrl: string; models: string[]; apiKey: string }) => void;
 }) {
+  const existingModels: string[] =
+    existing && Array.isArray((existing as any).models) && (existing as any).models.length
+      ? (existing as any).models
+      : existing?.model
+      ? [existing.model]
+      : [];
   const [name, setName] = useState(existing?.name ?? "");
   const [kind, setKind] = useState<"openai" | "claude">(existing?.kind ?? "openai");
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? "");
-  const [model, setModel] = useState(existing?.model ?? "");
+  const [modelsText, setModelsText] = useState(existingModels.join(", "));
   const [apiKey, setApiKey] = useState("");
+
+  function parseModels(): string[] {
+    return modelsText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -626,8 +698,9 @@ function CustomProviderDialog({
           <small>{kind === "claude" ? "Tambahkan /v1/messages otomatis." : "Tambahkan /chat/completions otomatis."}</small>
         </div>
         <div className="field">
-          <label>Model</label>
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="nama-model" />
+          <label>Model — pisahkan dengan koma untuk banyak model</label>
+          <input value={modelsText} onChange={(e) => setModelsText(e.target.value)} placeholder="mis. deepseek-chat, deepseek-reasoner" />
+          <small>Satu provider bisa punya banyak model. Model aktif dipilih di topbar & disimpan per sesi.</small>
         </div>
         <div className="field">
           <label>API key</label>
@@ -637,7 +710,13 @@ function CustomProviderDialog({
 
         <div className="dlg-actions">
           <button className="btn text" onClick={onClose}>Batal</button>
-          <button className="btn primary" onClick={() => onSave({ name: name.trim(), kind, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() })}>Simpan</button>
+          <button
+            className="btn primary"
+            disabled={!name.trim() || parseModels().length === 0}
+            onClick={() => onSave({ name: name.trim(), kind, baseUrl: baseUrl.trim(), models: parseModels(), apiKey: apiKey.trim() })}
+          >
+            Simpan
+          </button>
         </div>
       </div>
     </div>
