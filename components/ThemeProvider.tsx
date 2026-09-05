@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useMemo, ReactNode } from "react";
+import { ThemeProvider as MuiThemeProvider, createTheme, CssBaseline } from "@mui/material";
 
 interface ThemeContextValue {
   dark: boolean;
@@ -18,13 +19,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("darkMode", String(dark));
   }, [dark]);
 
+  const theme = useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode: dark ? "dark" : "light",
+          primary: { main: "#6750a4" },
+          secondary: { main: "#625b71" },
+        },
+        shape: { borderRadius: 12 },
+        typography: {
+          fontFamily:
+            "Roboto, system-ui, -apple-system, 'Segoe UI', sans-serif",
+        },
+      }),
+    [dark]
+  );
+
   return (
     <ThemeContext.Provider value={{ dark, toggle: () => setDark((d) => !d) }}>
-      {children}
+      <MuiThemeProvider theme={theme}>
+        <CssBaseline />
+        {children}
+      </MuiThemeProvider>
     </ThemeContext.Provider>
   );
 }

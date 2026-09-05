@@ -1,6 +1,49 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AppBar,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Drawer,
+  FormControl,
+  IconButton,
+  InputAdornment,
+  List,
+  ListItemButton,
+  ListItemText,
+  Menu,
+  MenuItem,
+  Paper,
+  Select,
+  SelectChangeEvent,
+  Switch,
+  TextField,
+  Toolbar,
+  Tooltip,
+  Typography,
+  FormControlLabel,
+  IconButton as MuiIconButton,
+  Divider,
+} from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
+import DeleteIcon from "@mui/icons-material/Delete";
+import CloseIcon from "@mui/icons-material/Close";
+import MenuIcon from "@mui/icons-material/Menu";
+import SettingsIcon from "@mui/icons-material/Settings";
+import SendIcon from "@mui/icons-material/Send";
+import StopIcon from "@mui/icons-material/Stop";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import ImageIcon from "@mui/icons-material/Image";
+import DescriptionIcon from "@mui/icons-material/Description";
+
 import { Markdown } from "@/components/Markdown";
 import { useTheme } from "@/components/ThemeProvider";
 import {
@@ -47,8 +90,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<string, boolean>>({});
-  const [showSettings, setShowSettings] = useState(false);
-  const [showCustomDialog, setShowCustomDialog] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -80,12 +125,16 @@ export default function Home() {
     }
     setMessages(await getMessages(id));
     setError(null);
+    setDrawerOpen(false);
   }
 
   async function newConversation() {
     setActiveConvId(null);
     setMessages([]);
     setError(null);
+    setInput("");
+    setAttachments([]);
+    setDrawerOpen(false);
   }
 
   async function ensureConversation(): Promise<Conversation> {
@@ -134,7 +183,7 @@ export default function Home() {
         : await getApiKey(`custom_${selection.provider.id}`);
 
     if (!apiKey) {
-      setError("API key belum diatur untuk provider ini.");
+      setError("API key belum diatur. Buka Settings untuk menambahkannya.");
       setStreaming(false);
       setMessages((m) => m.slice(0, -1));
       return;
@@ -167,7 +216,6 @@ export default function Home() {
 
       await addMessage({ conversationId: conv.id, role: "assistant", content: full, attachments: [] });
 
-      // Auto-rename on first exchange
       const curr = await getMessages(conv.id);
       if (curr.length <= 2 && text) {
         const title = text.slice(0, 50) + (text.length > 50 ? "..." : "");
@@ -195,142 +243,178 @@ export default function Home() {
       const mimeType = file.type || "application/octet-stream";
       const type = mimeType.startsWith("image") ? "image" : "document";
       const dataBase64 = await fileToBase64(file);
-      setAttachments((prev) => [
-        ...prev,
-        { type, mimeType, filename: file.name, dataBase64 },
-      ]);
+      setAttachments((prev) => [...prev, { type, mimeType, filename: file.name, dataBase64 }]);
     });
     e.target.value = "";
   }
 
   return (
-    <div className="flex h-screen">
-      {/* Sidebar */}
-      <aside className="hidden w-64 flex-col border-r border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900 md:flex">
-        <button
-          onClick={newConversation}
-          className="mb-3 w-full rounded-lg bg-zinc-900 py-2 text-sm text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-        >
-          + New chat
-        </button>
-        <div className="flex-1 overflow-y-auto">
-          {conversations.map((c) => (
-            <div
-              key={c.id}
-              className={`group flex items-center justify-between rounded-lg px-2 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                c.id === activeConvId ? "bg-zinc-100 dark:bg-zinc-800" : ""
-              }`}
-            >
-              <button onClick={() => loadConversation(c.id)} className="flex-1 truncate text-left">
-                {c.title}
-              </button>
-              <button
-                onClick={async () => {
-                  await deleteConversation(c.id);
-                  if (c.id === activeConvId) newConversation();
-                  refresh();
-                }}
-                className="hidden text-zinc-400 hover:text-red-500 group-hover:block"
+    <Box sx={{ display: "flex", height: "100vh" }}>
+      {/* Drawer / sidebar */}
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: 260,
+          flexShrink: 0,
+          display: { xs: "none", md: "block" },
+          "& .MuiDrawer-paper": { width: 260, boxSizing: "border-box" },
+        }}
+      >
+        <Toolbar />
+        <Box sx={{ p: 1.5, overflow: "auto" }}>
+          <Button
+            fullWidth
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={newConversation}
+          >
+            New chat
+          </Button>
+          <List sx={{ mt: 1 }}>
+            {conversations.map((c) => (
+              <ListItemButton
+                key={c.id}
+                selected={c.id === activeConvId}
+                onClick={() => loadConversation(c.id)}
+                sx={{ borderRadius: 2 }}
               >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={() => setShowSettings(true)}
-          className="mt-3 w-full rounded-lg border border-zinc-200 py-2 text-sm dark:border-zinc-800"
-        >
-          Settings
-        </button>
-      </aside>
+                <ListItemText primary={c.title} slotProps={{ primary: { noWrap: true } }} />
+                <MuiIconButton
+                  size="small"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await deleteConversation(c.id);
+                    if (c.id === activeConvId) newConversation();
+                    refresh();
+                  }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </MuiIconButton>
+              </ListItemButton>
+            ))}
+          </List>
+        </Box>
+        <Divider />
+        <Box sx={{ p: 1.5 }}>
+          <Button fullWidth startIcon={<SettingsIcon />} onClick={() => setSettingsOpen(true)}>
+            Settings
+          </Button>
+        </Box>
+      </Drawer>
+
+      {/* Mobile drawer */}
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <Box sx={{ width: 260, p: 1.5 }} role="presentation">
+          <Button fullWidth variant="contained" startIcon={<AddIcon />} onClick={newConversation}>
+            New chat
+          </Button>
+          <List sx={{ mt: 1 }}>
+            {conversations.map((c) => (
+              <ListItemButton key={c.id} selected={c.id === activeConvId} onClick={() => loadConversation(c.id)}>
+                <ListItemText primary={c.title} slotProps={{ primary: { noWrap: true } }} />
+              </ListItemButton>
+            ))}
+          </List>
+          <Divider sx={{ my: 1 }} />
+          <Button fullWidth startIcon={<SettingsIcon />} onClick={() => setSettingsOpen(true)}>
+            Settings
+          </Button>
+        </Box>
+      </Drawer>
 
       {/* Main */}
-      <main className="flex flex-1 flex-col">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-zinc-200 p-3 dark:border-zinc-800">
-          <div className="flex items-center gap-2">
-            <select
-              value={
-                selection.kind === "builtin"
-                  ? `builtin:${selection.provider}`
-                  : `custom:${selection.provider.id}`
-              }
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val.startsWith("custom:")) {
-                  const cp = customProviders.find((c) => c.id === val.slice(7));
-                  if (cp) setSelection({ kind: "custom", provider: cp });
-                } else {
-                  const provider = val.slice(8) as any;
-                  setSelection({ kind: "builtin", provider, model: defaultModelFor(provider) });
-                }
-              }}
-              className="rounded border border-zinc-300 bg-white p-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              {BUILTIN_PROVIDERS.map((p) => (
-                <option key={p.key} value={`builtin:${p.key}`}>
-                  {p.displayName}
-                </option>
-              ))}
-              {customProviders.map((cp) => (
-                <option key={cp.id} value={`custom:${cp.id}`}>
-                  {cp.name}
-                </option>
-              ))}
-            </select>
+      <Box sx={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
+          <Toolbar sx={{ gap: 1 }}>
+            <MuiIconButton sx={{ display: { md: "none" } }} onClick={() => setDrawerOpen(true)}>
+              <MenuIcon />
+            </MuiIconButton>
 
-            <select
-              value={selection.kind === "builtin" ? selection.model : selection.provider.model}
-              onChange={(e) => {
-                if (selection.kind === "builtin") {
-                  setSelection({ ...selection, model: e.target.value });
-                }
-              }}
-              disabled={selection.kind === "custom"}
-              className="rounded border border-zinc-300 bg-white p-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              {selection.kind === "builtin" &&
-                (BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.models ?? []).map(
-                  (m) => (
-                    <option key={m} value={m}>
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <Select
+                value={selection.kind === "builtin" ? `builtin:${selection.provider}` : `custom:${selection.provider.id}`}
+                onChange={(e: SelectChangeEvent) => {
+                  const val = e.target.value;
+                  if (val.startsWith("custom:")) {
+                    const cp = customProviders.find((c) => c.id === val.slice(7));
+                    if (cp) setSelection({ kind: "custom", provider: cp });
+                  } else {
+                    const provider = val.slice(8) as any;
+                    setSelection({ kind: "builtin", provider, model: defaultModelFor(provider) });
+                  }
+                }}
+              >
+                {BUILTIN_PROVIDERS.map((p) => (
+                  <MenuItem key={p.key} value={`builtin:${p.key}`}>
+                    {p.displayName}
+                  </MenuItem>
+                ))}
+                {customProviders.map((cp) => (
+                  <MenuItem key={cp.id} value={`custom:${cp.id}`}>
+                    {cp.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <Select
+                value={selection.kind === "builtin" ? selection.model : selection.provider.model}
+                onChange={(e: SelectChangeEvent) => {
+                  if (selection.kind === "builtin") {
+                    setSelection({ ...selection, model: e.target.value });
+                  }
+                }}
+                disabled={selection.kind === "custom"}
+              >
+                {selection.kind === "builtin" &&
+                  (BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.models ?? []).map((m) => (
+                    <MenuItem key={m} value={m}>
                       {m}
-                    </option>
-                  )
+                    </MenuItem>
+                  ))}
+                {selection.kind === "custom" && (
+                  <MenuItem value={selection.provider.model}>{selection.provider.model}</MenuItem>
                 )}
-              {selection.kind === "custom" && (
-                <option value={selection.provider.model}>{selection.provider.model}</option>
-              )}
-            </select>
-          </div>
+              </Select>
+            </FormControl>
 
-          <button
-            onClick={toggle}
-            className="rounded-lg border border-zinc-200 p-2 text-sm dark:border-zinc-800"
-          >
-            {dark ? "Light" : "Dark"}
-          </button>
-        </header>
+            <Box sx={{ flexGrow: 1 }} />
+
+            <Tooltip title={dark ? "Light mode" : "Dark mode"}>
+              <MuiIconButton onClick={toggle}>
+                {dark ? <LightModeIcon /> : <DarkModeIcon />}
+              </MuiIconButton>
+            </Tooltip>
+
+            <Tooltip title="Settings">
+              <MuiIconButton onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon />
+              </MuiIconButton>
+            </Tooltip>
+          </Toolbar>
+        </AppBar>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+        <Box ref={scrollRef} sx={{ flex: 1, overflowY: "auto", p: 3 }}>
           {messages.length === 0 && (
-            <div className="flex h-full items-center justify-center text-zinc-400">
-              Mulai percakapan baru
-            </div>
+            <Box sx={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "text.secondary" }}>
+              <Typography>Mulai percakapan baru</Typography>
+            </Box>
           )}
-          <div className="mx-auto flex max-w-3xl flex-col gap-4">
+          <Box sx={{ maxWidth: 760, mx: "auto", display: "flex", flexDirection: "column", gap: 1.5 }}>
             {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-2xl p-3 ${
-                    m.role === "user"
-                      ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                      : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                  }`}
+              <Box key={i} sx={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <Paper
+                  elevation={0}
+                  sx={{
+                    maxWidth: "85%",
+                    px: 1.5,
+                    py: 1,
+                    borderRadius: 3,
+                    bgcolor: m.role === "user" ? "primary.main" : "action.hover",
+                    color: m.role === "user" ? "primary.contrastText" : "text.primary",
+                  }}
                 >
                   {m.attachments?.map((a, ai) => (
                     <AttachmentView key={ai} att={a} />
@@ -338,49 +422,47 @@ export default function Home() {
                   {m.role === "assistant" ? (
                     <Markdown content={m.content} />
                   ) : (
-                    <p className="whitespace-pre-wrap">{m.content}</p>
+                    <Typography sx={{ whiteSpace: "pre-wrap" }}>{m.content}</Typography>
                   )}
-                </div>
-              </div>
+                </Paper>
+              </Box>
             ))}
-            {streaming && (
-              <div className="flex justify-start">
-                <span className="animate-pulse text-zinc-400">●</span>
-              </div>
-            )}
-          </div>
-        </div>
+          </Box>
+        </Box>
 
         {error && (
-          <div className="border-t border-red-200 bg-red-50 p-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
-            {error}
-          </div>
+          <Box sx={{ px: 2, py: 1, bgcolor: "error.dark", color: "error.contrastText" }}>
+            <Typography variant="body2">{error}</Typography>
+          </Box>
         )}
 
-        {/* Attachments preview */}
+        {/* Attachments */}
         {attachments.length > 0 && (
-          <div className="flex gap-2 border-t border-zinc-200 p-2 dark:border-zinc-800">
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", px: 2, py: 1, borderTop: 1, borderColor: "divider" }}>
             {attachments.map((a, i) => (
-              <span
+              <Chip
                 key={i}
-                className="flex items-center gap-1 rounded bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-800"
-              >
-                {a.filename ?? a.type}
-                <button onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}>
-                  ✕
-                </button>
-              </span>
+                icon={a.type === "image" ? <ImageIcon /> : <DescriptionIcon />}
+                label={a.filename ?? a.type}
+                onDelete={() => setAttachments((p) => p.filter((_, j) => j !== i))}
+              />
             ))}
-          </div>
+          </Box>
         )}
 
         {/* Input */}
-        <div className="flex items-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
-          <label className="cursor-pointer rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
-            📎
-            <input type="file" multiple className="hidden" onChange={handleAttach} />
-          </label>
-          <textarea
+        <Box sx={{ display: "flex", alignItems: "flex-end", gap: 1, p: 2, borderTop: 1, borderColor: "divider" }}>
+          <MuiIconButton component="label">
+            <AttachFileIcon />
+            <input type="file" multiple hidden onChange={handleAttach} />
+          </MuiIconButton>
+
+          <TextField
+            fullWidth
+            multiline
+            maxRows={4}
+            variant="outlined"
+            placeholder="Ketik pesan..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -389,36 +471,30 @@ export default function Home() {
                 handleSend();
               }
             }}
-            rows={1}
-            placeholder="Ketik pesan..."
-            className="flex-1 resize-none rounded-lg border border-zinc-300 bg-white p-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            size="small"
           />
-          {streaming ? (
-            <button
-              onClick={handleStop}
-              className="rounded-lg bg-red-500 px-3 py-2 text-sm text-white"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              Send
-            </button>
-          )}
-        </div>
-      </main>
 
-      {showSettings && (
-        <SettingsModal
+          {streaming ? (
+            <Button variant="contained" color="error" onClick={handleStop} sx={{ minWidth: 0, px: 2 }}>
+              <StopIcon />
+            </Button>
+          ) : (
+            <Button variant="contained" onClick={handleSend} sx={{ minWidth: 0, px: 2 }}>
+              <SendIcon />
+            </Button>
+          )}
+        </Box>
+      </Box>
+
+      {/* Settings */}
+      {settingsOpen && (
+        <SettingsDialog
           apiKeys={apiKeys}
           customProviders={customProviders}
           dark={dark}
           onToggleTheme={toggle}
           onClose={() => {
-            setShowSettings(false);
+            setSettingsOpen(false);
             refresh();
           }}
           onSaveKey={async (provider, key) => {
@@ -426,7 +502,7 @@ export default function Home() {
             else await removeApiKey(provider);
             setApiKeys(await listApiKeys());
           }}
-          onOpenCustom={() => setShowCustomDialog(true)}
+          onOpenCustom={() => setCustomDialogOpen(true)}
           onDeleteCustom={async (cp) => {
             await deleteCustomProviderDb(cp.id);
             refresh();
@@ -434,10 +510,11 @@ export default function Home() {
         />
       )}
 
-      {showCustomDialog && (
+      {/* Custom provider dialog */}
+      {customDialogOpen && (
         <CustomProviderDialog
           existing={null}
-          onClose={() => setShowCustomDialog(false)}
+          onClose={() => setCustomDialogOpen(false)}
           onSave={async (data) => {
             const id = crypto.randomUUID();
             await upsertCustomProvider({
@@ -451,27 +528,35 @@ export default function Home() {
             if (data.apiKey.trim()) {
               await setApiKey(`custom_${id}`, data.apiKey.trim());
             }
-            setShowCustomDialog(false);
+            setCustomDialogOpen(false);
             refresh();
           }}
         />
       )}
-    </div>
+    </Box>
   );
 }
 
 function AttachmentView({ att }: { att: Attachment }) {
   if (att.url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={att.url} alt={att.filename ?? "image"} className="max-w-full rounded" />;
+    return <img src={att.url} alt={att.filename ?? "image"} style={{ maxWidth: "100%", borderRadius: 8, margin: "4px 0" }} />;
   }
   if (att.type === "image" && att.dataBase64) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={`data:${att.mimeType};base64,${att.dataBase64}`} alt={att.filename ?? "image"} className="max-w-full rounded" />
+      <img src={`data:${att.mimeType};base64,${att.dataBase64}`} alt={att.filename ?? "image"} style={{ maxWidth: "100%", borderRadius: 8, margin: "4px 0" }} />
     );
   }
-  return <div className="text-sm text-blue-500">📄 {att.filename}</div>;
+  return (
+    <Chip
+      icon={<DescriptionIcon />}
+      label={att.filename}
+      variant="outlined"
+      size="small"
+      sx={{ my: 0.5 }}
+    />
+  );
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -483,7 +568,7 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function SettingsModal({
+function SettingsDialog({
   apiKeys,
   customProviders,
   dark,
@@ -505,66 +590,59 @@ function SettingsModal({
   const [keys, setKeys] = useState<Record<string, string>>({});
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 dark:bg-zinc-900">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Settings</h2>
-          <button onClick={onClose}>✕</button>
-        </div>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Settings</DialogTitle>
+      <DialogContent>
+        <FormControlLabel
+          control={<Switch checked={dark} onChange={onToggleTheme} />}
+          label="Dark mode"
+          sx={{ mb: 1 }}
+        />
 
-        <div className="mb-4 flex items-center justify-between">
-          <span>Dark mode</span>
-          <button
-            onClick={onToggleTheme}
-            className={`relative h-6 w-11 rounded-full ${dark ? "bg-zinc-300" : "bg-zinc-600"}`}
-          >
-            <span
-              className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${
-                dark ? "left-1" : "left-6"
-              }`}
-            />
-          </button>
-        </div>
-
-        <h3 className="mb-2 font-semibold">API Keys</h3>
+        <Typography variant="subtitle1" sx={{ mt: 1, mb: 1 }}>
+          API Keys
+        </Typography>
         {BUILTIN_PROVIDERS.map((p) => (
-          <div key={p.key} className="mb-3">
-            <div className="mb-1 flex items-center gap-2 text-sm">
-              <span>{p.displayName}</span>
-              <span className={apiKeys[p.key] ? "text-green-500" : "text-zinc-400"}>
+          <Box key={p.key} sx={{ mb: 2 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+              <Typography variant="body2">{p.displayName}</Typography>
+              <Typography variant="caption" color={apiKeys[p.key] ? "success.main" : "text.secondary"}>
                 {apiKeys[p.key] ? "● terhubung" : "○ belum diatur"}
-              </span>
-            </div>
-            <input
+              </Typography>
+            </Box>
+            <TextField
+              fullWidth
+              size="small"
               type="password"
               placeholder="API key"
               value={keys[p.key] ?? ""}
               onChange={(e) => setKeys({ ...keys, [p.key]: e.target.value })}
               onBlur={() => keys[p.key] !== undefined && onSaveKey(p.key, keys[p.key])}
-              className="w-full rounded border border-zinc-300 bg-white p-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
-          </div>
+          </Box>
         ))}
 
-        <h3 className="mb-2 mt-4 font-semibold">Custom Providers</h3>
+        <Typography variant="subtitle1" sx={{ mt: 2, mb: 1 }}>
+          Custom Providers
+        </Typography>
         {customProviders.map((cp) => (
-          <div key={cp.id} className="mb-2 flex items-center justify-between text-sm">
-            <span>
+          <Box key={cp.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+            <Typography variant="body2">
               {cp.name} · {cp.kind} · {cp.model}
-            </span>
-            <button onClick={() => onDeleteCustom(cp)} className="text-red-500">
-              Hapus
-            </button>
-          </div>
+            </Typography>
+            <MuiIconButton size="small" color="error" onClick={() => onDeleteCustom(cp)}>
+              <DeleteIcon fontSize="small" />
+            </MuiIconButton>
+          </Box>
         ))}
-        <button
-          onClick={onOpenCustom}
-          className="mt-2 rounded-lg border border-zinc-300 px-3 py-1 text-sm dark:border-zinc-700"
-        >
-          + Tambah
-        </button>
-      </div>
-    </div>
+        <Button startIcon={<AddIcon />} onClick={onOpenCustom} variant="outlined" size="small">
+          Tambah
+        </Button>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Tutup</Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -584,64 +662,31 @@ function CustomProviderDialog({
   const [apiKey, setApiKey] = useState("");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 dark:bg-zinc-900">
-        <h2 className="mb-4 text-lg font-semibold">Tambah Custom Provider</h2>
-        <div className="flex flex-col gap-3">
-          <input
-            placeholder="Nama"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="rounded border border-zinc-300 p-2 dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={() => setKind("openai")}
-              className={`flex-1 rounded-lg p-2 text-sm ${kind === "openai" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "border border-zinc-300 dark:border-zinc-700"}`}
-            >
-              OpenAI style
-            </button>
-            <button
-              onClick={() => setKind("claude")}
-              className={`flex-1 rounded-lg p-2 text-sm ${kind === "claude" ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "border border-zinc-300 dark:border-zinc-700"}`}
-            >
-              Claude style
-            </button>
-          </div>
-          <input
-            placeholder="Base URL"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            className="rounded border border-zinc-300 p-2 dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <input
-            placeholder="Model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="rounded border border-zinc-300 p-2 dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <input
-            type="password"
-            placeholder="API key"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="rounded border border-zinc-300 p-2 dark:border-zinc-700 dark:bg-zinc-900"
-          />
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700">
-            Batal
-          </button>
-          <button
-            onClick={() =>
-              onSave({ name: name.trim(), kind, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() })
-            }
-            className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Simpan
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{existing ? "Edit Custom Provider" : "Tambah Custom Provider"}</DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+          <TextField label="Nama" value={name} onChange={(e) => setName(e.target.value)} fullWidth size="small" />
+          <FormControl size="small" fullWidth>
+            <Select value={kind} onChange={(e) => setKind(e.target.value as "openai" | "claude")}>
+              <MenuItem value="openai">OpenAI style</MenuItem>
+              <MenuItem value="claude">Claude style</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} fullWidth size="small" />
+          <TextField label="Model" value={model} onChange={(e) => setModel(e.target.value)} fullWidth size="small" />
+          <TextField label="API key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} fullWidth size="small" />
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Batal</Button>
+        <Button
+          variant="contained"
+          onClick={() => onSave({ name: name.trim(), kind, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() })}
+        >
+          Simpan
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
