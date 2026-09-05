@@ -68,10 +68,8 @@ export default {
 
     if (!upstream.ok) {
       const text = await upstream.text().catch(() => "");
-      return json(
-        { error: `Upstream error (${upstream.status}): ${text.slice(0, 500)}` },
-        502
-      );
+      const friendly = friendlyUpstreamError(upstream.status, text, kind);
+      return json({ error: friendly }, upstream.status === 401 || upstream.status === 403 ? 401 : 502);
     }
 
     const stream = new ReadableStream({
@@ -133,6 +131,41 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/** Convert a raw upstream error body into a short, human-readable message. */
+function friendlyUpstreamError(status: number, text: string, kind: string): string {
+  // Try to extract a useful message from JSON bodies like
+  // {"error": {"message": "..."}} (OpenAI/DeepSeek/Google) or
+  // {"type": "error", "error": {"message": "..."}} (Anthropic).
+  let message = "";
+  try {
+    const parsed = JSON.parse(text);
+    message =
+      parsed?.error?.message ??
+      parsed?.error?.Message ??
+      parsed?.message ??
+      parsed?.error?.error?.message ??
+      "";
+  } catch {
+    message = "";
+  }
+
+  if (status === 401 || status === 403) {
+    return `API key tidak valid untuk ${kind}${message ? ` (${message})` : ""}.`;
+  }
+  if (status === 404) {
+    return `Endpoint/model tidak ditemukan untuk ${kind}${message ? ` (${message})` : ""}.`;
+  }
+  if (status === 429) {
+    return `Rate limit / kuota habis untuk ${kind}.`;
+  }
+  if (message) {
+    return `${kind}: ${message}`;
+  }
+  // Fallback: return a truncated, sanitized snippet (avoid dumping long tokens).
+  const clean = text.replace(/\s+/g, " ").trim();
+  return `${kind} error (${status}): ${clean.slice(0, 200)}`;
 }
 
 function buildRequest(body: ChatRequestBody): {

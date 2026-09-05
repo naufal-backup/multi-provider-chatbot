@@ -94,6 +94,10 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [retryPayload, setRetryPayload] = useState<{
+    text: string;
+    attachments: Attachment[];
+  } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -157,11 +161,12 @@ export default function Home() {
     return conv;
   }
 
-  async function handleSend() {
-    const text = input.trim();
-    if ((!text && attachments.length === 0) || streaming) return;
+  async function handleSend(retryText?: string, retryAttachments?: Attachment[]) {
+    const text = (retryText ?? input).trim();
+    const sendAttachments = retryAttachments ?? attachments;
+    if ((!text && sendAttachments.length === 0) || streaming) return;
 
-    const userMsg: ChatMessage = { role: "user", content: text, attachments };
+    const userMsg: ChatMessage = { role: "user", content: text, attachments: sendAttachments };
     const nextMessages: ChatMessage[] = [
       ...messages,
       userMsg,
@@ -172,10 +177,11 @@ export default function Home() {
     setAttachments([]);
     setStreaming(true);
     setError(null);
+    setRetryPayload(null);
 
     const conv = await ensureConversation();
 
-    await addMessage({ conversationId: conv.id, role: "user", content: text, attachments });
+    await addMessage({ conversationId: conv.id, role: "user", content: text, attachments: sendAttachments });
 
     const apiKey =
       selection.kind === "builtin"
@@ -185,6 +191,7 @@ export default function Home() {
     if (!apiKey) {
       setError("API key belum diatur. Buka Settings untuk menambahkannya.");
       setStreaming(false);
+      setRetryPayload({ text, attachments: sendAttachments });
       setMessages((m) => m.slice(0, -1));
       return;
     }
@@ -224,6 +231,7 @@ export default function Home() {
       await refresh();
     } catch (e: any) {
       setError(e?.message ?? "Terjadi kesalahan.");
+      setRetryPayload({ text, attachments: sendAttachments });
       setMessages((m) => m.slice(0, -1));
     } finally {
       setStreaming(false);
@@ -419,7 +427,9 @@ export default function Home() {
                   {m.attachments?.map((a, ai) => (
                     <AttachmentView key={ai} att={a} />
                   ))}
-                  {m.role === "assistant" ? (
+                  {m.role === "assistant" && m.content === "" && streaming ? (
+                    <ThinkingIndicator />
+                  ) : m.role === "assistant" ? (
                     <Markdown content={m.content} />
                   ) : (
                     <Typography sx={{ whiteSpace: "pre-wrap" }}>{m.content}</Typography>
@@ -431,8 +441,20 @@ export default function Home() {
         </Box>
 
         {error && (
-          <Box sx={{ px: 2, py: 1, bgcolor: "error.dark", color: "error.contrastText" }}>
-            <Typography variant="body2">{error}</Typography>
+          <Box sx={{ px: 2, py: 1, bgcolor: "error.dark", color: "error.contrastText", display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="body2" sx={{ flex: 1 }}>
+              {error}
+            </Typography>
+            {retryPayload && (
+              <Button
+                size="small"
+                variant="contained"
+                color="inherit"
+                onClick={() => handleSend(retryPayload.text, retryPayload.attachments)}
+              >
+                Coba lagi
+              </Button>
+            )}
           </Box>
         )}
 
@@ -479,7 +501,7 @@ export default function Home() {
               <StopIcon />
             </Button>
           ) : (
-            <Button variant="contained" onClick={handleSend} sx={{ minWidth: 0, px: 2 }}>
+            <Button variant="contained" onClick={() => handleSend()} sx={{ minWidth: 0, px: 2 }}>
               <SendIcon />
             </Button>
           )}
@@ -533,6 +555,33 @@ export default function Home() {
           }}
         />
       )}
+    </Box>
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: "text.secondary", py: 0.5 }}>
+      <Typography variant="body2">Berpikir</Typography>
+      <Box sx={{ display: "flex", gap: 0.5 }}>
+        {[0, 1, 2].map((i) => (
+          <Box
+            key={i}
+            sx={{
+              width: 5,
+              height: 5,
+              borderRadius: "50%",
+              bgcolor: "text.secondary",
+              animation: "pulse 1.2s ease-in-out infinite",
+              animationDelay: `${i * 0.2}s`,
+              "@keyframes pulse": {
+                "0%, 60%, 100%": { opacity: 0.2, transform: "scale(0.8)" },
+                "30%": { opacity: 1, transform: "scale(1)" },
+              },
+            }}
+          />
+        ))}
+      </Box>
     </Box>
   );
 }
