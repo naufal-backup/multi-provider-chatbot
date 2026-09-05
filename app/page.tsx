@@ -34,6 +34,7 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import CloseIcon from "@mui/icons-material/Close";
 import MenuIcon from "@mui/icons-material/Menu";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -93,6 +94,7 @@ export default function Home() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [editingCustom, setEditingCustom] = useState<CustomProvider | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [retryPayload, setRetryPayload] = useState<{
     text: string;
@@ -524,7 +526,14 @@ export default function Home() {
             else await removeApiKey(provider);
             setApiKeys(await listApiKeys());
           }}
-          onOpenCustom={() => setCustomDialogOpen(true)}
+          onOpenCustom={() => {
+            setEditingCustom(null);
+            setCustomDialogOpen(true);
+          }}
+          onEditCustom={(cp) => {
+            setEditingCustom(cp);
+            setCustomDialogOpen(true);
+          }}
           onDeleteCustom={async (cp) => {
             await deleteCustomProviderDb(cp.id);
             refresh();
@@ -535,22 +544,26 @@ export default function Home() {
       {/* Custom provider dialog */}
       {customDialogOpen && (
         <CustomProviderDialog
-          existing={null}
-          onClose={() => setCustomDialogOpen(false)}
+          existing={editingCustom}
+          onClose={() => {
+            setCustomDialogOpen(false);
+            setEditingCustom(null);
+          }}
           onSave={async (data) => {
-            const id = crypto.randomUUID();
+            const id = editingCustom?.id ?? crypto.randomUUID();
             await upsertCustomProvider({
               id,
               name: data.name,
               kind: data.kind,
               baseUrl: data.baseUrl,
               model: data.model,
-              createdAt: Date.now(),
+              createdAt: editingCustom?.createdAt ?? Date.now(),
             });
             if (data.apiKey.trim()) {
               await setApiKey(`custom_${id}`, data.apiKey.trim());
             }
             setCustomDialogOpen(false);
+            setEditingCustom(null);
             refresh();
           }}
         />
@@ -625,6 +638,7 @@ function SettingsDialog({
   onClose,
   onSaveKey,
   onOpenCustom,
+  onEditCustom,
   onDeleteCustom,
 }: {
   apiKeys: Record<string, boolean>;
@@ -634,6 +648,7 @@ function SettingsDialog({
   onClose: () => void;
   onSaveKey: (provider: string, key: string) => void;
   onOpenCustom: () => void;
+  onEditCustom: (cp: CustomProvider) => void;
   onDeleteCustom: (cp: CustomProvider) => void;
 }) {
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -679,9 +694,14 @@ function SettingsDialog({
             <Typography variant="body2">
               {cp.name} · {cp.kind} · {cp.model}
             </Typography>
-            <MuiIconButton size="small" color="error" onClick={() => onDeleteCustom(cp)}>
-              <DeleteIcon fontSize="small" />
-            </MuiIconButton>
+            <Box sx={{ display: "flex", gap: 0.5 }}>
+              <MuiIconButton size="small" onClick={() => onEditCustom(cp)}>
+                <EditIcon fontSize="small" />
+              </MuiIconButton>
+              <MuiIconButton size="small" color="error" onClick={() => onDeleteCustom(cp)}>
+                <DeleteIcon fontSize="small" />
+              </MuiIconButton>
+            </Box>
           </Box>
         ))}
         <Button startIcon={<AddIcon />} onClick={onOpenCustom} variant="outlined" size="small">
@@ -724,7 +744,16 @@ function CustomProviderDialog({
           </FormControl>
           <TextField label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} fullWidth size="small" />
           <TextField label="Model" value={model} onChange={(e) => setModel(e.target.value)} fullWidth size="small" />
-          <TextField label="API key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} fullWidth size="small" />
+          <TextField
+            label="API key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            fullWidth
+            size="small"
+            placeholder={existing ? "Kosongkan jika tidak diubah" : ""}
+            helperText={existing ? "Biarkan kosong untuk mempertahankan key lama." : ""}
+          />
         </Box>
       </DialogContent>
       <DialogActions>
