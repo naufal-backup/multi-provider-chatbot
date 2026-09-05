@@ -1,50 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  AppBar,
-  Box,
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Drawer,
-  FormControl,
-  IconButton,
-  InputAdornment,
-  List,
-  ListItemButton,
-  ListItemText,
-  Menu,
-  MenuItem,
-  Paper,
-  Select,
-  SelectChangeEvent,
-  Switch,
-  TextField,
-  Toolbar,
-  Tooltip,
-  Typography,
-  FormControlLabel,
-  IconButton as MuiIconButton,
-  Divider,
-} from "@mui/material";
-import AddIcon from "@mui/icons-material/Add";
-import AttachFileIcon from "@mui/icons-material/AttachFile";
-import DeleteIcon from "@mui/icons-material/Delete";
-import EditIcon from "@mui/icons-material/Edit";
-import CloseIcon from "@mui/icons-material/Close";
-import MenuIcon from "@mui/icons-material/Menu";
-import SettingsIcon from "@mui/icons-material/Settings";
-import SendIcon from "@mui/icons-material/Send";
-import StopIcon from "@mui/icons-material/Stop";
-import DarkModeIcon from "@mui/icons-material/DarkMode";
-import LightModeIcon from "@mui/icons-material/LightMode";
-import ImageIcon from "@mui/icons-material/Image";
-import DescriptionIcon from "@mui/icons-material/Description";
-
 import { Markdown } from "@/components/Markdown";
 import { useTheme } from "@/components/ThemeProvider";
 import {
@@ -74,6 +30,13 @@ import {
 } from "@/lib/db";
 import { streamChat } from "@/lib/stream";
 
+const SUGGESTIONS = [
+  "Bantu aku menyusun rencana belajar 30 hari",
+  "Jelaskan cara kerja panel surya secara sederhana",
+  "Tuliskan caption Instagram untuk kedai kopi",
+  "Buatkan draf email cuti kerja yang sopan",
+];
+
 export default function Home() {
   const { dark, toggle } = useTheme();
 
@@ -91,11 +54,9 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<string, boolean>>({});
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [editingCustom, setEditingCustom] = useState<CustomProvider | null>(null);
-  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [retryPayload, setRetryPayload] = useState<{
     text: string;
     attachments: Attachment[];
@@ -103,6 +64,7 @@ export default function Home() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const started = messages.length > 0;
 
   const refresh = useCallback(async () => {
     setConversations(await getAllConversations());
@@ -131,7 +93,6 @@ export default function Home() {
     }
     setMessages(await getMessages(id));
     setError(null);
-    setDrawerOpen(false);
   }
 
   async function newConversation() {
@@ -140,7 +101,6 @@ export default function Home() {
     setError(null);
     setInput("");
     setAttachments([]);
-    setDrawerOpen(false);
   }
 
   async function ensureConversation(): Promise<Conversation> {
@@ -151,7 +111,7 @@ export default function Home() {
     const now = Date.now();
     const conv: Conversation = {
       id: crypto.randomUUID(),
-      title: "New chat",
+      title: "Percakapan baru",
       provider: selection.kind === "builtin" ? selection.provider : "openai",
       model: selection.kind === "builtin" ? selection.model : selection.provider.model,
       customProviderId: selection.kind === "custom" ? selection.provider.id : null,
@@ -191,15 +151,14 @@ export default function Home() {
         : await getApiKey(`custom_${selection.provider.id}`);
 
     if (!apiKey) {
-      setError("API key belum diatur. Buka Settings untuk menambahkannya.");
+      setError("API key belum diatur. Buka Pengaturan untuk menambahkannya.");
       setStreaming(false);
       setRetryPayload({ text, attachments: sendAttachments });
       setMessages((m) => m.slice(0, -1));
       return;
     }
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+    abortRef.current = new AbortController();
 
     let full = "";
     try {
@@ -227,7 +186,7 @@ export default function Home() {
 
       const curr = await getMessages(conv.id);
       if (curr.length <= 2 && text) {
-        const title = text.slice(0, 50) + (text.length > 50 ? "..." : "");
+        const title = text.slice(0, 40) + (text.length > 40 ? "…" : "");
         await renameConversation(conv.id, title);
       }
       await refresh();
@@ -258,92 +217,67 @@ export default function Home() {
     e.target.value = "";
   }
 
-  return (
-    <Box sx={{ display: "flex", height: "100vh" }}>
-      {/* Drawer / sidebar */}
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: 260,
-          flexShrink: 0,
-          display: { xs: "none", md: "block" },
-          "& .MuiDrawer-paper": { width: 260, boxSizing: "border-box" },
-        }}
-      >
-        <Toolbar />
-        <Box sx={{ p: 1.5, overflow: "auto" }}>
-          <Button
-            fullWidth
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={newConversation}
-          >
-            New chat
-          </Button>
-          <List sx={{ mt: 1 }}>
-            {conversations.map((c) => (
-              <ListItemButton
-                key={c.id}
-                selected={c.id === activeConvId}
-                onClick={() => loadConversation(c.id)}
-                sx={{ borderRadius: 2 }}
-              >
-                <ListItemText primary={c.title} slotProps={{ primary: { noWrap: true } }} />
-                <MuiIconButton
-                  size="small"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    await deleteConversation(c.id);
-                    if (c.id === activeConvId) newConversation();
-                    refresh();
-                  }}
-                >
-                  <DeleteIcon fontSize="small" />
-                </MuiIconButton>
-              </ListItemButton>
-            ))}
-          </List>
-        </Box>
-        <Divider />
-        <Box sx={{ p: 1.5 }}>
-          <Button fullWidth startIcon={<SettingsIcon />} onClick={() => setSettingsOpen(true)}>
-            Settings
-          </Button>
-        </Box>
-      </Drawer>
+  const currentTitle =
+    conversations.find((c) => c.id === activeConvId)?.title ?? "Percakapan baru";
 
-      {/* Mobile drawer */}
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <Box sx={{ width: 260, p: 1.5 }} role="presentation">
-          <Button fullWidth variant="contained" startIcon={<AddIcon />} onClick={newConversation}>
-            New chat
-          </Button>
-          <List sx={{ mt: 1 }}>
-            {conversations.map((c) => (
-              <ListItemButton key={c.id} selected={c.id === activeConvId} onClick={() => loadConversation(c.id)}>
-                <ListItemText primary={c.title} slotProps={{ primary: { noWrap: true } }} />
-              </ListItemButton>
-            ))}
-          </List>
-          <Divider sx={{ my: 1 }} />
-          <Button fullWidth startIcon={<SettingsIcon />} onClick={() => setSettingsOpen(true)}>
-            Settings
-          </Button>
-        </Box>
-      </Drawer>
+  return (
+    <div className="app">
+      {/* Sidebar */}
+      <aside className="drawer">
+        <div className="brand">
+          <div className="brand-mark"></div>
+          <div className="brand-name display-font">Asisten</div>
+        </div>
+
+        <button className="new-chat-btn" onClick={newConversation}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          Percakapan baru
+        </button>
+
+        <div className="nav-section-label">Terbaru</div>
+        {conversations.map((c) => (
+          <button
+            key={c.id}
+            className={`nav-item ${c.id === activeConvId ? "active" : ""}`}
+            onClick={() => loadConversation(c.id)}
+          >
+            <span>{c.title}</span>
+            <span
+              className="nav-del"
+              title="Hapus"
+              onClick={async (e) => {
+                e.stopPropagation();
+                await deleteConversation(c.id);
+                if (c.id === activeConvId) newConversation();
+                refresh();
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </span>
+          </button>
+        ))}
+
+        <button className="drawer-footer" onClick={() => setSettingsOpen(true)}>
+          <div className="avatar">A</div>
+          <div className="footer-text">
+            <strong>Pengguna</strong>
+            Pengaturan & API key
+          </div>
+        </button>
+      </aside>
 
       {/* Main */}
-      <Box sx={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: "divider" }}>
-          <Toolbar sx={{ gap: 1 }}>
-            <MuiIconButton sx={{ display: { md: "none" } }} onClick={() => setDrawerOpen(true)}>
-              <MenuIcon />
-            </MuiIconButton>
-
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <Select
+      <main className="main">
+        <div className="topbar">
+          <div className="topbar-left">
+            <div className="topbar-title display-font">{currentTitle}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="model-pill">
+              <span className="model-dot"></span>
+              <select
                 value={selection.kind === "builtin" ? `builtin:${selection.provider}` : `custom:${selection.provider.id}`}
-                onChange={(e: SelectChangeEvent) => {
+                onChange={(e) => {
                   const val = e.target.value;
                   if (val.startsWith("custom:")) {
                     const cp = customProviders.find((c) => c.id === val.slice(7));
@@ -355,22 +289,18 @@ export default function Home() {
                 }}
               >
                 {BUILTIN_PROVIDERS.map((p) => (
-                  <MenuItem key={p.key} value={`builtin:${p.key}`}>
-                    {p.displayName}
-                  </MenuItem>
+                  <option key={p.key} value={`builtin:${p.key}`}>{p.displayName}</option>
                 ))}
                 {customProviders.map((cp) => (
-                  <MenuItem key={cp.id} value={`custom:${cp.id}`}>
-                    {cp.name}
-                  </MenuItem>
+                  <option key={cp.id} value={`custom:${cp.id}`}>{cp.name}</option>
                 ))}
-              </Select>
-            </FormControl>
+              </select>
+            </div>
 
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <Select
+            <div className="model-pill">
+              <select
                 value={selection.kind === "builtin" ? selection.model : selection.provider.model}
-                onChange={(e: SelectChangeEvent) => {
+                onChange={(e) => {
                   if (selection.kind === "builtin") {
                     setSelection({ ...selection, model: e.target.value });
                   }
@@ -379,136 +309,133 @@ export default function Home() {
               >
                 {selection.kind === "builtin" &&
                   (BUILTIN_PROVIDERS.find((p) => p.key === selection.provider)?.models ?? []).map((m) => (
-                    <MenuItem key={m} value={m}>
-                      {m}
-                    </MenuItem>
+                    <option key={m} value={m}>{m}</option>
                   ))}
                 {selection.kind === "custom" && (
-                  <MenuItem value={selection.provider.model}>{selection.provider.model}</MenuItem>
+                  <option value={selection.provider.model}>{selection.provider.model}</option>
                 )}
-              </Select>
-            </FormControl>
+              </select>
+            </div>
 
-            <Box sx={{ flexGrow: 1 }} />
+            <button className="icon-btn" title="Mode" onClick={toggle}>
+              {dark ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
+              )}
+            </button>
 
-            <Tooltip title={dark ? "Light mode" : "Dark mode"}>
-              <MuiIconButton onClick={toggle}>
-                {dark ? <LightModeIcon /> : <DarkModeIcon />}
-              </MuiIconButton>
-            </Tooltip>
+            <button className="icon-btn" title="Pengaturan" onClick={() => setSettingsOpen(true)}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+          </div>
+        </div>
 
-            <Tooltip title="Settings">
-              <MuiIconButton onClick={() => setSettingsOpen(true)}>
-                <SettingsIcon />
-              </MuiIconButton>
-            </Tooltip>
-          </Toolbar>
-        </AppBar>
-
-        {/* Messages */}
-        <Box ref={scrollRef} sx={{ flex: 1, overflowY: "auto", p: 3 }}>
-          {messages.length === 0 && (
-            <Box sx={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "text.secondary" }}>
-              <Typography>Mulai percakapan baru</Typography>
-            </Box>
+        <div className="conversation" ref={scrollRef}>
+          {!started && !streaming && (
+            <div className="empty-state">
+              <div className="empty-mark"></div>
+              <div className="empty-title display-font">Ada yang bisa dibantu?</div>
+              <div className="empty-sub">
+                Tanyakan apa saja — mulai dari menulis, merangkum, sampai memecahkan masalah sehari-hari.
+              </div>
+              <div className="suggestion-row">
+                {SUGGESTIONS.map((s) => (
+                  <button key={s} className="suggestion-chip" onClick={() => { setInput(s); handleSend(s); }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
-          <Box sx={{ maxWidth: 760, mx: "auto", display: "flex", flexDirection: "column", gap: 1.5 }}>
-            {messages.map((m, i) => (
-              <Box key={i} sx={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                <Paper
-                  elevation={0}
-                  sx={{
-                    maxWidth: "85%",
-                    px: 1.5,
-                    py: 1,
-                    borderRadius: 3,
-                    bgcolor: m.role === "user" ? "primary.main" : "action.hover",
-                    color: m.role === "user" ? "primary.contrastText" : "text.primary",
-                  }}
-                >
-                  {m.attachments?.map((a, ai) => (
-                    <AttachmentView key={ai} att={a} />
-                  ))}
-                  {m.role === "assistant" && m.content === "" && streaming ? (
-                    <ThinkingIndicator />
-                  ) : m.role === "assistant" ? (
-                    <Markdown content={m.content} />
-                  ) : (
-                    <Typography sx={{ whiteSpace: "pre-wrap" }}>{m.content}</Typography>
+
+          {(started || streaming) && (
+            <div className="conv-inner">
+              {messages.map((m, i) => (
+                <div key={i} className={`msg-row ${m.role === "user" ? "user" : "bot"}`}>
+                  <div className={`msg-avatar ${m.role === "user" ? "user" : "bot"}`}>
+                    {m.role === "user" ? "A" : "AI"}
+                  </div>
+                  <div className="msg-bubble">
+                    {m.attachments && m.attachments.length > 0 && (
+                      <div className="msg-attachments">
+                        {m.attachments.map((a, ai) => <AttachmentView key={ai} att={a} />)}
+                      </div>
+                    )}
+                    {m.role === "assistant" && m.content === "" && streaming ? (
+                      <div className="typing"><span></span><span></span><span></span></div>
+                    ) : m.role === "assistant" ? (
+                      <Markdown content={m.content} />
+                    ) : (
+                      <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {error && (
+                <div className="error-banner">
+                  <span className="error-text">{error}</span>
+                  {retryPayload && (
+                    <button className="retry-btn" onClick={() => handleSend(retryPayload.text, retryPayload.attachments)}>
+                      Coba lagi
+                    </button>
                   )}
-                </Paper>
-              </Box>
-            ))}
-          </Box>
-        </Box>
-
-        {error && (
-          <Box sx={{ px: 2, py: 1, bgcolor: "error.dark", color: "error.contrastText", display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="body2" sx={{ flex: 1 }}>
-              {error}
-            </Typography>
-            {retryPayload && (
-              <Button
-                size="small"
-                variant="contained"
-                color="inherit"
-                onClick={() => handleSend(retryPayload.text, retryPayload.attachments)}
-              >
-                Coba lagi
-              </Button>
-            )}
-          </Box>
-        )}
-
-        {/* Attachments */}
-        {attachments.length > 0 && (
-          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", px: 2, py: 1, borderTop: 1, borderColor: "divider" }}>
-            {attachments.map((a, i) => (
-              <Chip
-                key={i}
-                icon={a.type === "image" ? <ImageIcon /> : <DescriptionIcon />}
-                label={a.filename ?? a.type}
-                onDelete={() => setAttachments((p) => p.filter((_, j) => j !== i))}
-              />
-            ))}
-          </Box>
-        )}
-
-        {/* Input */}
-        <Box sx={{ display: "flex", alignItems: "flex-end", gap: 1, p: 2, borderTop: 1, borderColor: "divider" }}>
-          <MuiIconButton component="label">
-            <AttachFileIcon />
-            <input type="file" multiple hidden onChange={handleAttach} />
-          </MuiIconButton>
-
-          <TextField
-            fullWidth
-            multiline
-            maxRows={4}
-            variant="outlined"
-            placeholder="Ketik pesan..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            size="small"
-          />
-
-          {streaming ? (
-            <Button variant="contained" color="error" onClick={handleStop} sx={{ minWidth: 0, px: 2 }}>
-              <StopIcon />
-            </Button>
-          ) : (
-            <Button variant="contained" onClick={() => handleSend()} sx={{ minWidth: 0, px: 2 }}>
-              <SendIcon />
-            </Button>
+                </div>
+              )}
+            </div>
           )}
-        </Box>
-      </Box>
+        </div>
+
+        <div className="composer-wrap">
+          <div className="composer">
+            <button className="attach-btn" title="Lampirkan file" onClick={() => document.getElementById("file-input")?.click()}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 12v0a9 9 0 0 1-9 9 9 9 0 0 1-9-9 9 9 0 0 1 9-9h1a5 5 0 0 1 5 5v7a3 3 0 1 1-6 0V8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <input id="file-input" type="file" multiple hidden onChange={handleAttach} />
+
+            <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              {attachments.length > 0 && (
+                <div className="attach-chips">
+                  {attachments.map((a, i) => (
+                    <span key={i} className="attach-chip">
+                      {a.filename ?? a.type}
+                      <span style={{ cursor: "pointer" }} onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}>✕</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <textarea
+                rows={1}
+                placeholder="Kirim pesan..."
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+              />
+            </div>
+
+            {streaming ? (
+              <button className="send-btn stop" title="Hentikan" onClick={handleStop}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              </button>
+            ) : (
+              <button className="send-btn" title="Kirim" disabled={!input.trim() && attachments.length === 0} onClick={() => handleSend()}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            )}
+          </div>
+          <div className="composer-hint">Asisten dapat membuat kesalahan. Periksa kembali informasi penting.</div>
+        </div>
+      </main>
 
       {/* Settings */}
       {settingsOpen && (
@@ -517,38 +444,22 @@ export default function Home() {
           customProviders={customProviders}
           dark={dark}
           onToggleTheme={toggle}
-          onClose={() => {
-            setSettingsOpen(false);
-            refresh();
-          }}
+          onClose={() => { setSettingsOpen(false); refresh(); }}
           onSaveKey={async (provider, key) => {
             if (key.trim()) await setApiKey(provider, key.trim());
             else await removeApiKey(provider);
             setApiKeys(await listApiKeys());
           }}
-          onOpenCustom={() => {
-            setEditingCustom(null);
-            setCustomDialogOpen(true);
-          }}
-          onEditCustom={(cp) => {
-            setEditingCustom(cp);
-            setCustomDialogOpen(true);
-          }}
-          onDeleteCustom={async (cp) => {
-            await deleteCustomProviderDb(cp.id);
-            refresh();
-          }}
+          onOpenCustom={() => { setEditingCustom(null); setCustomDialogOpen(true); }}
+          onEditCustom={(cp) => { setEditingCustom(cp); setCustomDialogOpen(true); }}
+          onDeleteCustom={async (cp) => { await deleteCustomProviderDb(cp.id); refresh(); }}
         />
       )}
 
-      {/* Custom provider dialog */}
       {customDialogOpen && (
         <CustomProviderDialog
           existing={editingCustom}
-          onClose={() => {
-            setCustomDialogOpen(false);
-            setEditingCustom(null);
-          }}
+          onClose={() => { setCustomDialogOpen(false); setEditingCustom(null); }}
           onSave={async (data) => {
             const id = editingCustom?.id ?? crypto.randomUUID();
             await upsertCustomProvider({
@@ -559,66 +470,27 @@ export default function Home() {
               model: data.model,
               createdAt: editingCustom?.createdAt ?? Date.now(),
             });
-            if (data.apiKey.trim()) {
-              await setApiKey(`custom_${id}`, data.apiKey.trim());
-            }
+            if (data.apiKey.trim()) await setApiKey(`custom_${id}`, data.apiKey.trim());
             setCustomDialogOpen(false);
             setEditingCustom(null);
             refresh();
           }}
         />
       )}
-    </Box>
-  );
-}
-
-function ThinkingIndicator() {
-  return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: "text.secondary", py: 0.5 }}>
-      <Typography variant="body2">Berpikir</Typography>
-      <Box sx={{ display: "flex", gap: 0.5 }}>
-        {[0, 1, 2].map((i) => (
-          <Box
-            key={i}
-            sx={{
-              width: 5,
-              height: 5,
-              borderRadius: "50%",
-              bgcolor: "text.secondary",
-              animation: "pulse 1.2s ease-in-out infinite",
-              animationDelay: `${i * 0.2}s`,
-              "@keyframes pulse": {
-                "0%, 60%, 100%": { opacity: 0.2, transform: "scale(0.8)" },
-                "30%": { opacity: 1, transform: "scale(1)" },
-              },
-            }}
-          />
-        ))}
-      </Box>
-    </Box>
+    </div>
   );
 }
 
 function AttachmentView({ att }: { att: Attachment }) {
   if (att.url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={att.url} alt={att.filename ?? "image"} style={{ maxWidth: "100%", borderRadius: 8, margin: "4px 0" }} />;
+    return <img src={att.url} alt={att.filename ?? "image"} />;
   }
   if (att.type === "image" && att.dataBase64) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={`data:${att.mimeType};base64,${att.dataBase64}`} alt={att.filename ?? "image"} style={{ maxWidth: "100%", borderRadius: 8, margin: "4px 0" }} />
-    );
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={`data:${att.mimeType};base64,${att.dataBase64}`} alt={att.filename ?? "image"} />;
   }
-  return (
-    <Chip
-      icon={<DescriptionIcon />}
-      label={att.filename}
-      variant="outlined"
-      size="small"
-      sx={{ my: 0.5 }}
-    />
-  );
+  return <span className="attach-chip">📄 {att.filename}</span>;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -654,64 +526,63 @@ function SettingsDialog({
   const [keys, setKeys] = useState<Record<string, string>>({});
 
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Settings</DialogTitle>
-      <DialogContent>
-        <FormControlLabel
-          control={<Switch checked={dark} onChange={onToggleTheme} />}
-          label="Dark mode"
-          sx={{ mb: 1 }}
-        />
+    <div className="overlay" onClick={onClose}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <button className="dlg-close" onClick={onClose}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+        </button>
+        <h2>Pengaturan</h2>
 
-        <Typography variant="subtitle1" sx={{ mt: 1, mb: 1 }}>
-          API Keys
-        </Typography>
+        <div className="switch-row">
+          <span>Mode gelap</span>
+          <button className={`toggle ${dark ? "on" : ""}`} onClick={onToggleTheme}></button>
+        </div>
+
+        <div className="dlg-section">API Keys</div>
         {BUILTIN_PROVIDERS.map((p) => (
-          <Box key={p.key} sx={{ mb: 2 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-              <Typography variant="body2">{p.displayName}</Typography>
-              <Typography variant="caption" color={apiKeys[p.key] ? "success.main" : "text.secondary"}>
-                {apiKeys[p.key] ? "● terhubung" : "○ belum diatur"}
-              </Typography>
-            </Box>
-            <TextField
-              fullWidth
-              size="small"
+          <div className="field" key={p.key}>
+            <label>
+              {p.displayName}{" "}
+              <span className={`key-status ${apiKeys[p.key] ? "ok" : ""}`}>
+                {apiKeys[p.key] ? "• terhubung" : "• belum diatur"}
+              </span>
+            </label>
+            <input
               type="password"
               placeholder="API key"
               value={keys[p.key] ?? ""}
               onChange={(e) => setKeys({ ...keys, [p.key]: e.target.value })}
               onBlur={() => keys[p.key] !== undefined && onSaveKey(p.key, keys[p.key])}
             />
-          </Box>
+          </div>
         ))}
 
-        <Typography variant="subtitle1" sx={{ mt: 2, mb: 1 }}>
-          Custom Providers
-        </Typography>
+        <div className="dlg-section">Custom Providers</div>
         {customProviders.map((cp) => (
-          <Box key={cp.id} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
-            <Typography variant="body2">
-              {cp.name} · {cp.kind} · {cp.model}
-            </Typography>
-            <Box sx={{ display: "flex", gap: 0.5 }}>
-              <MuiIconButton size="small" onClick={() => onEditCustom(cp)}>
-                <EditIcon fontSize="small" />
-              </MuiIconButton>
-              <MuiIconButton size="small" color="error" onClick={() => onDeleteCustom(cp)}>
-                <DeleteIcon fontSize="small" />
-              </MuiIconButton>
-            </Box>
-          </Box>
+          <div className="provider-row" key={cp.id}>
+            <div className="p-info">
+              {cp.name}
+              <small>{cp.kind} · {cp.model}</small>
+            </div>
+            <div className="p-actions">
+              <button title="Edit" onClick={() => onEditCustom(cp)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
+              </button>
+              <button className="danger" title="Hapus" onClick={() => onDeleteCustom(cp)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 7h12M9 7V4h6v3m-8 0 1 13h8l1-13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
         ))}
-        <Button startIcon={<AddIcon />} onClick={onOpenCustom} variant="outlined" size="small">
-          Tambah
-        </Button>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Tutup</Button>
-      </DialogActions>
-    </Dialog>
+        <button className="btn text" style={{ marginTop: 8 }} onClick={onOpenCustom}>
+          + Tambah custom provider
+        </button>
+
+        <div className="dlg-actions">
+          <button className="btn text" onClick={onClose}>Tutup</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -731,40 +602,43 @@ function CustomProviderDialog({
   const [apiKey, setApiKey] = useState("");
 
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>{existing ? "Edit Custom Provider" : "Tambah Custom Provider"}</DialogTitle>
-      <DialogContent>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-          <TextField label="Nama" value={name} onChange={(e) => setName(e.target.value)} fullWidth size="small" />
-          <FormControl size="small" fullWidth>
-            <Select value={kind} onChange={(e) => setKind(e.target.value as "openai" | "claude")}>
-              <MenuItem value="openai">OpenAI style</MenuItem>
-              <MenuItem value="claude">Claude style</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} fullWidth size="small" />
-          <TextField label="Model" value={model} onChange={(e) => setModel(e.target.value)} fullWidth size="small" />
-          <TextField
-            label="API key"
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            fullWidth
-            size="small"
-            placeholder={existing ? "Kosongkan jika tidak diubah" : ""}
-            helperText={existing ? "Biarkan kosong untuk mempertahankan key lama." : ""}
-          />
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Batal</Button>
-        <Button
-          variant="contained"
-          onClick={() => onSave({ name: name.trim(), kind, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() })}
-        >
-          Simpan
-        </Button>
-      </DialogActions>
-    </Dialog>
+    <div className="overlay" onClick={onClose}>
+      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <button className="dlg-close" onClick={onClose}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+        </button>
+        <h2>{existing ? "Edit Custom Provider" : "Tambah Custom Provider"}</h2>
+
+        <div className="field">
+          <label>Nama</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Mis. OpenRouter" />
+        </div>
+        <div className="field">
+          <label>Jenis</label>
+          <select value={kind} onChange={(e) => setKind(e.target.value as "openai" | "claude")}>
+            <option value="openai">OpenAI style</option>
+            <option value="claude">Claude style</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Base URL</label>
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1/chat/completions" />
+        </div>
+        <div className="field">
+          <label>Model</label>
+          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="nama-model" />
+        </div>
+        <div className="field">
+          <label>API key</label>
+          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={existing ? "Kosongkan jika tidak diubah" : ""} />
+          {existing && <small>Biarkan kosong untuk mempertahankan key lama.</small>}
+        </div>
+
+        <div className="dlg-actions">
+          <button className="btn text" onClick={onClose}>Batal</button>
+          <button className="btn primary" onClick={() => onSave({ name: name.trim(), kind, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() })}>Simpan</button>
+        </div>
+      </div>
+    </div>
   );
 }

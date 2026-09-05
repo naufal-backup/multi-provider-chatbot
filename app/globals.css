@@ -1,17 +1,7 @@
-* {
-  box-sizing: border-box;
-}
+@import "./m3.css";
 
 html,
-body {
-  padding: 0;
-  margin: 0;
+body,
+#__next {
   height: 100%;
-}
-
-pre code.hljs {
-  display: block;
-  overflow-x: auto;
-  padding: 1em;
-  border-radius: 8px;
 }
