@@ -22,8 +22,6 @@ import com.naufal.chatbot.ui.history.HistoryScreen
 import com.naufal.chatbot.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
 
-private const val WORKER_URL = "https://your-worker.your-subdomain.workers.dev/chat"
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
@@ -33,8 +31,9 @@ fun MainScreen() {
     val repository = ChatRepository(
         conversationDao = app.database.conversationDao(),
         messageDao = app.database.messageDao(),
+        customProviderDao = app.database.customProviderDao(),
         secureKeyStore = app.secureKeyStore,
-        apiService = ChatApiService(WORKER_URL)
+        apiService = ChatApiService()
     )
 
     val navController = rememberNavController()
@@ -82,17 +81,17 @@ fun MainScreen() {
             }
             composable("chat/{id}") { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("id")
-                // Load existing conversation; for MVP a simple placeholder.
-                // The ChatScreen will need to be enhanced to load by id.
                 ChatScreen(
                     repository = repository,
-                    onNewChat = { navigate("chat") },
-                    onOpenSettings = { navigate("settings") }
+                    onNewChat = { navController.navigate("chat") },
+                    onOpenSettings = { navigate("settings") },
+                    conversationId = id
                 )
             }
             composable("settings") {
                 SettingsScreen(
                     secureKeyStore = app.secureKeyStore,
+                    repository = repository,
                     onBack = { navController.popBackStack() }
                 )
             }

@@ -23,3 +23,17 @@ data class ChatMessage(
     val role: String,
     val content: String
 )
+
+enum class CustomKind {
+    OPENAI,
+    CLAUDE
+}
+
+data class CustomProvider(
+    val id: String,
+    val name: String,
+    val kind: CustomKind,
+    val baseUrl: String,
+    val model: String,
+    val createdAt: Long
+)

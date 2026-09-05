@@ -32,3 +32,13 @@ data class MessageEntity(
     val content: String,
     val createdAt: Long
 )
+
+@Entity(tableName = "custom_providers")
+data class CustomProviderEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val kind: String,      // "openai" | "claude"
+    val baseUrl: String,
+    val model: String,
+    val createdAt: Long
+)

@@ -1,0 +1,50 @@
+package com.naufal.chatbot.data.remote
+
+import com.naufal.chatbot.model.ChatMessage
+import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+
+/**
+ * DeepSeek exposes an OpenAI-compatible API.
+ */
+class DeepSeekClient : ProviderClient {
+    override fun streamChat(
+        apiKey: String,
+        model: String,
+        messages: List<ChatMessage>
+    ): Flow<String> {
+        val body = buildJsonObject {
+            put("model", model)
+            put("messages", buildJsonArray {
+                messages.forEach { m ->
+                    addJsonObject {
+                        put("role", m.role)
+                        put("content", m.content)
+                    }
+                }
+            })
+            put("stream", true)
+        }
+
+        return SsePump.stream(
+            url = "https://api.deepseek.com/chat/completions",
+            headers = mapOf(
+                "Authorization" to "Bearer $apiKey"
+            ),
+            bodyJson = body.toString(),
+            parseChunk = { chunk ->
+                chunk.jsonObject["choices"]
+                    ?.jsonArray?.firstOrNull()
+                    ?.jsonObject?.get("delta")
+                    ?.jsonObject?.get("content")
+                    ?.jsonPrimitive?.content
+            }
+        )
+    }
+}

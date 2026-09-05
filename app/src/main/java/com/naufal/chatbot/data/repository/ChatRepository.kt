@@ -3,14 +3,16 @@ package com.naufal.chatbot.data.repository
 import com.naufal.chatbot.Provider
 import com.naufal.chatbot.data.local.ConversationDao
 import com.naufal.chatbot.data.local.ConversationEntity
+import com.naufal.chatbot.data.local.CustomProviderDao
+import com.naufal.chatbot.data.local.CustomProviderEntity
 import com.naufal.chatbot.data.local.MessageDao
 import com.naufal.chatbot.data.local.MessageEntity
 import com.naufal.chatbot.data.local.SecureKeyStore
 import com.naufal.chatbot.data.remote.ChatApiService
-import com.naufal.chatbot.data.remote.dto.ChatMessageDto
-import com.naufal.chatbot.data.remote.dto.ChatRequest
 import com.naufal.chatbot.model.ChatMessage
 import com.naufal.chatbot.model.Conversation
+import com.naufal.chatbot.model.CustomKind
+import com.naufal.chatbot.model.CustomProvider
 import com.naufal.chatbot.model.Message
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -19,6 +21,7 @@ import java.util.UUID
 class ChatRepository(
     private val conversationDao: ConversationDao,
     private val messageDao: MessageDao,
+    private val customProviderDao: CustomProviderDao,
     private val secureKeyStore: SecureKeyStore,
     private val apiService: ChatApiService
 ) {
@@ -32,6 +35,9 @@ class ChatRepository(
         messageDao.getMessagesByConversation(conversationId).map { entities ->
             entities.map { it.toDomain() }
         }
+
+    suspend fun getConversationById(id: String): Conversation? =
+        conversationDao.getConversationById(id)?.toDomain()
 
     suspend fun createConversation(
         title: String,
@@ -79,6 +85,86 @@ class ChatRepository(
         )
     }
 
+    // ---- Custom providers ----
+
+    fun getAllCustomProviders(): Flow<List<CustomProvider>> =
+        customProviderDao.getAll().map { entities ->
+            entities.map { it.toDomain() }
+        }
+
+    suspend fun saveCustomProvider(
+        id: String?,
+        name: String,
+        kind: CustomKind,
+        baseUrl: String,
+        model: String,
+        apiKey: String
+    ) {
+        val providerId = id ?: UUID.randomUUID().toString()
+        customProviderDao.upsert(
+            CustomProviderEntity(
+                id = providerId,
+                name = name,
+                kind = when (kind) {
+                    CustomKind.OPENAI -> "openai"
+                    CustomKind.CLAUDE -> "claude"
+                },
+                baseUrl = baseUrl,
+                model = model,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+        if (apiKey.isBlank()) {
+            secureKeyStore.removeKey("custom_$providerId")
+        } else {
+            secureKeyStore.saveKey("custom_$providerId", apiKey)
+        }
+    }
+
+    suspend fun deleteCustomProvider(provider: CustomProvider) {
+        customProviderDao.delete(
+            CustomProviderEntity(
+                id = provider.id,
+                name = provider.name,
+                kind = when (provider.kind) {
+                    CustomKind.OPENAI -> "openai"
+                    CustomKind.CLAUDE -> "claude"
+                },
+                baseUrl = provider.baseUrl,
+                model = provider.model,
+                createdAt = provider.createdAt
+            )
+        )
+        secureKeyStore.removeKey("custom_${provider.id}")
+    }
+
+    suspend fun streamChatCustom(
+        provider: CustomProvider,
+        messages: List<ChatMessage>
+    ): Flow<String> {
+        val apiKey = secureKeyStore.getKey("custom_${provider.id}")
+            ?: throw IllegalStateException("API key not configured for ${provider.name}")
+        return apiService.streamChatCustom(
+            kind = provider.kind,
+            baseUrl = provider.baseUrl,
+            apiKey = apiKey,
+            model = provider.model,
+            messages = messages
+        )
+    }
+
+    private fun CustomProviderEntity.toDomain() = CustomProvider(
+        id = id,
+        name = name,
+        kind = when (kind) {
+            "claude" -> CustomKind.CLAUDE
+            else -> CustomKind.OPENAI
+        },
+        baseUrl = baseUrl,
+        model = model,
+        createdAt = createdAt
+    )
+
     suspend fun streamChat(
         provider: Provider,
         model: String,
@@ -87,14 +173,7 @@ class ChatRepository(
         val apiKey = secureKeyStore.getKey(provider.key)
             ?: throw IllegalStateException("API key not configured for ${provider.displayName}")
 
-        val request = ChatRequest(
-            provider = provider.key,
-            model = model,
-            apiKey = apiKey,
-            messages = messages.map { ChatMessageDto(it.role, it.content) }
-        )
-
-        return apiService.streamChat(request)
+        return apiService.streamChat(provider, apiKey, model, messages)
     }
 
     private fun ConversationEntity.toDomain() = Conversation(

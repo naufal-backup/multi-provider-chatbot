@@ -1,45 +1,53 @@
 # Multi-Provider Chatbot
 
-Aplikasi chatbot mobile **Android native** (Kotlin + Jetpack Compose) yang memungkinkan percakapan dengan berbagai model AI (OpenAI, Anthropic/Claude, Google/Gemini, DeepSeek) menggunakan **API key milik pengguna sendiri (BYOK)**. Serverless, tanpa login, seluruh data tersimpan lokal di perangkat.
+Aplikasi chatbot mobile **Android native** (Kotlin + Jetpack Compose) yang memungkinkan percakapan dengan berbagai model AI (OpenAI, Anthropic/Claude, Google/Gemini, DeepSeek, dan custom provider) menggunakan **API key milik pengguna sendiri (BYOK)**. Serverless murni, tanpa login, tanpa proxy — seluruh data tersimpan lokal di perangkat.
 
 ## Arsitektur
 
 ```
 [Android App - Kotlin + Jetpack Compose]
-   ├── UI (Compose): Chat, History, Settings
-   ├── Room DB: riwayat percakapan (conversations, messages)
+   ├── UI (Material 3): Chat, History, Settings
+   ├── Room DB: riwayat percakapan (conversations, messages, custom_providers)
    ├── EncryptedSharedPreferences: API keys (terenkripsi)
    ├── Ktor Client: networking + streaming (SSE)
-   └── HTTP → [Cloudflare Worker (stateless proxy)]
-                       │
-              ┌────────┼─────────┬──────────┐
-              ▼        ▼         ▼          ▼
-          OpenAI   Anthropic   Google    DeepSeek
+   └── HTTP langsung → API provider (tanpa proxy/worker)
+                          │
+             ┌────────────┼────────────┬──────────────┐
+             ▼            ▼            ▼              ▼
+         OpenAI       Anthropic      Google        DeepSeek   (+ custom OpenAI/Claude style)
 ```
 
-- **Worker stateless** — tidak menyimpan API key/sesi, hanya menyeragamkan format request/response & streaming antar provider.
+- **Tanpa server/proxy** — app memanggil API tiap provider langsung dari perangkat.
 - **MVVM** — ViewModel + StateFlow, Repository untuk akses Room & network.
-- **BYOK** — API key dikirim per-request, tidak pernah tersimpan di server.
+- **BYOK** — API key dikirim langsung ke provider per-request, tidak pernah lewat server pihak ketiga.
 
 ## Struktur Project
 
 ```
 /app       → Android (Kotlin + Compose, MVVM, Room, Ktor)
-/worker    → Cloudflare Worker (TypeScript, routing 4 provider)
 /.github   → GitHub Actions (build APK)
 ```
 
-## Fitur MVP (Fase 1)
+## Fitur
 
 | # | Fitur |
 |---|---|
 | F1 | Input & simpan API key (terenkripsi lokal) |
 | F2 | Pilih provider & model |
 | F3 | Chat streaming token-by-token |
-| F4 | Riwayat percakapan tersimpan |
+| F4 | Riwayat percakapan tersimpan (history session) |
 | F5 | Rename/hapus percakapan |
 | F6 | Render markdown & code block |
 | F7 | Percakapan baru |
+| F8 | Custom provider (OpenAI/Claude style, base URL bebas) |
+
+## Custom Provider
+
+Selain 4 provider bawaan, pengguna bisa menambah provider sendiri:
+- **OpenAI style** — kompatibel dengan OpenRouter, Groq, Together, Ollama, endpoint OpenAI-compatible lainnya.
+- **Claude style** — kompatibel dengan endpoint Anthropic-compatible.
+
+Setiap custom provider memiliki base URL, model, dan API key sendiri (API key terenkripsi lokal).
 
 ## Build (via GitHub Actions)
 
@@ -58,17 +66,6 @@ cd app
 ./gradlew assembleDebug      # Linux/macOS
 gradlew.bat assembleDebug    # Windows
 ```
-
-## Deploy Worker (Cloudflare)
-
-```bash
-cd worker
-npm install
-npx wrangler login
-npx wrangler deploy
-```
-
-Setelah deploy, ganti nilai `WORKER_URL` di `app/src/main/java/com/naufal/chatbot/ui/MainScreen.kt` dengan URL worker kamu (mis. `https://your-worker.your-subdomain.workers.dev/chat`).
 
 ## Konfigurasi API Key
 

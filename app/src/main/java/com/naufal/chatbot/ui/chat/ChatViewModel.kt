@@ -49,6 +49,24 @@ class ChatViewModel(
         }
     }
 
+    fun loadConversationById(id: String) {
+        if (_uiState.value.isInitialized) return
+        viewModelScope.launch {
+            val conversation = repository.getConversationById(id) ?: return@launch
+            _uiState.value = _uiState.value.copy(
+                conversation = conversation,
+                selectedProvider = conversation.provider,
+                selectedModel = conversation.model,
+                isInitialized = true
+            )
+            repository.getMessages(id).collect { msgs ->
+                _uiState.value = _uiState.value.copy(
+                    messages = msgs.map { ChatMessage(it.role, it.content) }
+                )
+            }
+        }
+    }
+
     fun loadConversation(conversation: Conversation) {
         _uiState.value = _uiState.value.copy(
             conversation = conversation,

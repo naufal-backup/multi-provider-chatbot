@@ -53,6 +53,7 @@ fun ChatScreen(
     repository: ChatRepository,
     onNewChat: () -> Unit,
     onOpenSettings: () -> Unit,
+    conversationId: String? = null,
     initialProvider: Provider = Provider.OPENAI,
     initialModel: String = "gpt-4o-mini",
     viewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(repository))
@@ -62,7 +63,11 @@ fun ChatScreen(
 
     LaunchedEffect(Unit) {
         if (!uiState.isInitialized) {
-            viewModel.initialize(initialProvider, initialModel)
+            if (conversationId != null) {
+                viewModel.loadConversationById(conversationId)
+            } else {
+                viewModel.initialize(initialProvider, initialModel)
+            }
         }
     }
 
