@@ -528,36 +528,38 @@ export default function Home() {
                   <div className={`msg-avatar ${m.role === "user" ? "user" : "bot"}`}>
                     {m.role === "user" ? "A" : "AI"}
                   </div>
-                  <div className="msg-bubble">
-                    {m.attachments && m.attachments.length > 0 && (
-                      <div className="msg-attachments">
-                        {m.attachments.map((a, ai) => <AttachmentView key={ai} att={a} />)}
-                      </div>
-                    )}
-                    {m.role === "assistant" && m.content === "" && streaming ? (
-                      <div className="typing"><span></span><span></span><span></span></div>
-                    ) : editingIdx === i ? (
-                      <div>
-                        <textarea
-                          className="msg-edit-area"
-                          value={editingText}
-                          onChange={(e) => setEditingText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSave(i); }
-                            if (e.key === "Escape") { setEditingIdx(null); setEditingText(""); }
-                          }}
-                          autoFocus
-                        />
-                        <div className="msg-edit-btns">
-                          <button className="btn primary" onClick={() => handleEditSave(i)}>Simpan</button>
-                          <button className="btn text" onClick={() => { setEditingIdx(null); setEditingText(""); }}>Batal</button>
+                  <div className="msg-body">
+                    <div className="msg-bubble">
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div className="msg-attachments">
+                          {m.attachments.map((a, ai) => <AttachmentView key={ai} att={a} />)}
                         </div>
-                      </div>
-                    ) : m.role === "assistant" ? (
-                      <Markdown content={m.content} />
-                    ) : (
-                      <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-                    )}
+                      )}
+                      {m.role === "assistant" && m.content === "" && streaming ? (
+                        <div className="typing"><span></span><span></span><span></span></div>
+                      ) : editingIdx === i ? (
+                        <div>
+                          <textarea
+                            className="msg-edit-area"
+                            value={editingText}
+                            onChange={(e) => setEditingText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSave(i); }
+                              if (e.key === "Escape") { setEditingIdx(null); setEditingText(""); }
+                            }}
+                            autoFocus
+                          />
+                          <div className="msg-edit-btns">
+                            <button className="btn primary" onClick={() => handleEditSave(i)}>Simpan</button>
+                            <button className="btn text" onClick={() => { setEditingIdx(null); setEditingText(""); }}>Batal</button>
+                          </div>
+                        </div>
+                      ) : m.role === "assistant" ? (
+                        <Markdown content={m.content} />
+                      ) : (
+                        <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+                      )}
+                    </div>
 
                     {m.content && !streaming && (
                       <div className="msg-actions">

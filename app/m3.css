@@ -376,6 +376,8 @@ body{
 /* Message rows — minimal */
 .msg-row{ display:flex; gap:10px; align-items:flex-start; }
 .msg-row.user{ flex-direction:row-reverse; }
+.msg-body{ display:flex; flex-direction:column; max-width:76%; min-width:0; }
+.msg-row.user .msg-body{ align-items:flex-end; }
 
 .msg-avatar{
   width:28px; height:28px;
@@ -389,7 +391,6 @@ body{
 .msg-avatar.user{ background: var(--md-primary); color: var(--md-on-primary); border-color: var(--md-primary); }
 
 .msg-bubble{
-  max-width: 76%;
   padding: 12px 14px;
   font-size:13.5px;
   line-height:1.65;
@@ -415,8 +416,10 @@ body{
 .msg-bubble code{ font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:12.5px; }
 .msg-bubble :not(pre) > code{ background: var(--md-surface-container); border:1px solid var(--md-outline-variant); padding:2px 6px; border-radius:6px; font-size:12px; }
 
-/* Message actions */
-.msg-actions{ display:flex; gap:2px; margin-top:6px; opacity:0; transition: opacity .15s; }
+/* Message actions — outside bubble */
+.msg-actions{ display:flex; gap:2px; margin-top:4px; opacity:0; transition: opacity .15s; }
+.msg-row.bot .msg-actions{ justify-content:flex-start; }
+.msg-row.user .msg-actions{ justify-content:flex-end; }
 .msg-row:hover .msg-actions{ opacity:1; }
 .msg-action{
   width:28px; height:28px; border-radius: var(--shape-xs);
