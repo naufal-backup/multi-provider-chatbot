@@ -133,6 +133,15 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+/**
+ * Append the required path suffix to a custom base URL if it isn't already there.
+ * This prevents doubled paths like /v1/v1/messages.
+ */
+function normalizeUrl(baseUrl: string, suffix: string): string {
+  const u = baseUrl.trim().replace(/\/+$/, "");
+  return u.endsWith(suffix) ? u : u + suffix;
+}
+
 /** Convert a raw upstream error body into a short, human-readable message. */
 function friendlyUpstreamError(status: number, text: string, kind: string): string {
   // Try to extract a useful message from JSON bodies like
@@ -193,7 +202,7 @@ function buildRequest(body: ChatRequestBody): {
       if (system) payload.system = system;
       const baseUrl =
         body.custom && body.baseUrl
-          ? body.baseUrl
+          ? normalizeUrl(body.baseUrl, "/v1/messages")
           : "https://api.anthropic.com/v1/messages";
       return {
         url: baseUrl,
@@ -235,7 +244,7 @@ function buildRequest(body: ChatRequestBody): {
       };
       const baseUrl =
         body.custom && body.baseUrl
-          ? body.baseUrl
+          ? normalizeUrl(body.baseUrl, "/chat/completions")
           : kind === "deepseek"
           ? "https://api.deepseek.com/chat/completions"
           : "https://api.openai.com/v1/chat/completions";

@@ -622,7 +622,8 @@ function CustomProviderDialog({
         </div>
         <div className="field">
           <label>Base URL</label>
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1/chat/completions" />
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={kind === "claude" ? "https://ai.geraikita.com" : "https://ai.geraikita.com/v1"} />
+          <small>{kind === "claude" ? "Tambahkan /v1/messages otomatis." : "Tambahkan /chat/completions otomatis."}</small>
         </div>
         <div className="field">
           <label>Model</label>
